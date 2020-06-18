@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2016 the Urho3D project.
+// Copyright (c) 2008-2020 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@ class Audio;
 class Sound;
 class SoundStream;
 
-// Compressed audio decode buffer length in milliseconds
+/// Compressed audio decode buffer length in milliseconds.
 static const int STREAM_BUFFER_LENGTH = 100;
 
 /// %Sound source component with stereo position. A sound source needs to be created to a node to be considered "enabled" and be able to play, however that node does not need to belong to a scene.
@@ -42,12 +42,14 @@ class URHO3D_API SoundSource : public Component
 
 public:
     /// Construct.
-    SoundSource(Context* context);
-    /// Destruct. Remove self from the audio subsystem
-    virtual ~SoundSource();
+    explicit SoundSource(Context* context);
+    /// Destruct. Remove self from the audio subsystem.
+    ~SoundSource() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
+    /// Seek to time.
+    void Seek(float seekTime);
     /// Play a sound.
     void Play(Sound* sound);
     /// Play a sound with specified frequency.
@@ -70,7 +72,7 @@ public:
     void SetAttenuation(float attenuation);
     /// Set stereo panning. -1.0 is full left and 1.0 is full right.
     void SetPanning(float panning);
-    //// Set to remove either the sound source component or its owner node from the scene automatically on sound playback completion. Disabled by default.
+    /// Set to remove either the sound source component or its owner node from the scene automatically on sound playback completion. Disabled by default.
     void SetAutoRemoveMode(AutoRemoveMode mode);
     /// Set new playback position.
     void SetPlayPosition(signed char* pos);
@@ -118,7 +120,7 @@ public:
     void SetPositionAttr(int value);
     /// Return sound attribute.
     ResourceRef GetSoundAttr() const;
-    /// Set sound playing attribute
+    /// Set sound playing attribute.
     void SetPlayingAttr(bool value);
     /// Return sound position attribute.
     int GetPositionAttr() const;
@@ -139,7 +141,7 @@ protected:
     /// Stereo panning.
     float panning_;
     /// Effective master gain.
-    float masterGain_;
+    float masterGain_{};
     /// Whether finished event should be sent on playback stop.
     bool sendFinishedEvent_;
     /// Automatic removal mode.
@@ -149,11 +151,11 @@ private:
     /// Play a sound without locking the audio mutex. Called internally.
     void PlayLockless(Sound* sound);
     /// Play a sound stream without locking the audio mutex. Called internally.
-    void PlayLockless(SharedPtr<SoundStream> stream);
+    void PlayLockless(const SharedPtr<SoundStream>& stream);
     /// Stop sound without locking the audio mutex. Called internally.
     void StopLockless();
     /// Set new playback position without locking the audio mutex. Called internally.
-    void SetPlayPositionLockless(signed char* position);
+    void SetPlayPositionLockless(signed char* pos);
     /// Mix mono sample to mono buffer.
     void MixMonoToMono(Sound* sound, int* dest, unsigned samples, int mixRate);
     /// Mix mono sample to stereo buffer.

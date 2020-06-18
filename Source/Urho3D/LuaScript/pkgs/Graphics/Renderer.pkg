@@ -11,13 +11,14 @@ class Renderer
     void SetSpecularLighting(bool enable);
     void SetTextureAnisotropy(int level);
     void SetTextureFilterMode(TextureFilterMode mode);
-    void SetTextureQuality(int quality);
-    void SetMaterialQuality(int quality);
+    void SetTextureQuality(MaterialQuality quality);
+    void SetMaterialQuality(MaterialQuality quality);
     void SetDrawShadows(bool enable);
     void SetShadowMapSize(int size);
     void SetShadowQuality(ShadowQuality quality);
     void SetShadowSoftness(float shadowSoftness);
     void SetVSMShadowParameters(float minVariance, float lightBleedingReduction);
+    void SetVSMMultiSample(int multiSample);
     void SetReuseShadowMaps(bool enable);
     void SetMaxShadowMaps(int shadowMaps);
     void SetDynamicInstancing(bool enable);
@@ -32,9 +33,10 @@ class Renderer
     void SetMobileShadowBiasAdd(float add);
     void SetMobileNormalOffsetMul(float mul);
     void ReloadShaders();
-    
+
     unsigned GetNumViewports() const;
     Viewport* GetViewport(unsigned index) const;
+    Viewport* GetViewportForScene(Scene* scene, unsigned index) const;
     RenderPath* GetDefaultRenderPath() const;
     Technique* GetDefaultTechnique() const;
     bool GetHDRRendering() const;
@@ -42,12 +44,13 @@ class Renderer
     bool GetDrawShadows() const;
     int GetTextureAnisotropy() const;
     TextureFilterMode GetTextureFilterMode() const;
-    int GetTextureQuality() const;
-    int GetMaterialQuality() const;
+    MaterialQuality GetTextureQuality() const;
+    MaterialQuality GetMaterialQuality() const;
     int GetShadowMapSize() const;
     ShadowQuality GetShadowQuality() const;
     float GetShadowSoftness() const;
     Vector2 GetVSMShadowParameters() const;
+    int GetVSMMultiSample() const;
     bool GetReuseShadowMaps() const;
     int GetMaxShadowMaps() const;
     bool GetDynamicInstancing() const;
@@ -83,11 +86,12 @@ class Renderer
     tolua_property__get_set bool drawShadows;
     tolua_property__get_set int textureAnisotropy;
     tolua_property__get_set TextureFilterMode textureFilterMode;
-    tolua_property__get_set int textureQuality;
-    tolua_property__get_set int materialQuality;
+    tolua_property__get_set MaterialQuality textureQuality;
+    tolua_property__get_set MaterialQuality materialQuality;
     tolua_property__get_set int shadowMapSize;
     tolua_property__get_set ShadowQuality shadowQuality;
     tolua_property__get_set float shadowSoftness;
+    tolua_property__get_set int VSMMultiSample;
     tolua_property__get_set bool reuseShadowMaps;
     tolua_property__get_set int maxShadowMaps;
     tolua_property__get_set bool dynamicInstancing;

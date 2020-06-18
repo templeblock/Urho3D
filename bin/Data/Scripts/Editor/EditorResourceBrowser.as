@@ -96,7 +96,7 @@ const StringHash JSON_TYPE_GENERIC("json");
 const StringHash BINARY_TYPE_SCENE("USCN");
 const StringHash BINARY_TYPE_PACKAGE("UPAK");
 const StringHash BINARY_TYPE_COMPRESSED_PACKAGE("ULZ4");
-const StringHash BINARY_TYPE_ANGLESCRIPT("ASBC");
+const StringHash BINARY_TYPE_ANGELSCRIPT("ASBC");
 const StringHash BINARY_TYPE_MODEL("UMDL");
 const StringHash BINARY_TYPE_MODEL2("UMD2");
 const StringHash BINARY_TYPE_SHADER("USHD");
@@ -266,7 +266,7 @@ void CreateResourceFilterUI()
     Array<ResourceType@> sorted;
     for (int i=1; i <= NUMBER_OF_VALID_RESOURCE_TYPES; ++i)
         sorted.Push(ResourceType(i, ResourceTypeName(i)));
-        
+
     // 2 unknown types are reserved for the top, the rest are alphabetized
     sorted.Sort();
     sorted.Insert(0, ResourceType(RESOURCE_TYPE_UNKNOWN, ResourceTypeName(RESOURCE_TYPE_UNKNOWN)) );
@@ -351,7 +351,7 @@ void InitializeBrowserFileListRow(Text@ fileText, BrowserFile@ file)
         text.text = file.ResourceTypeName();
     }
 
-    if (file.resourceType == RESOURCE_TYPE_MATERIAL || 
+    if (file.resourceType == RESOURCE_TYPE_MATERIAL ||
             file.resourceType == RESOURCE_TYPE_MODEL ||
             file.resourceType == RESOURCE_TYPE_PARTICLEEFFECT ||
             file.resourceType == RESOURCE_TYPE_PREFAB
@@ -491,7 +491,7 @@ BrowserDir@ InitBrowserDir(String path)
                 parent.children.Push(browserDir);
             }
             @parent = browserDir;
-        } 
+        }
         return browserDir;
     }
     return null;
@@ -1031,7 +1031,7 @@ void HandleBrowserFileDragEnd(StringHash eventType, VariantMap& eventData)
             StaticModel@ sm = createdNode.CreateComponent("StaticModel");
             sm.model = model;
         }
-        
+
         AdjustNodePositionByAABB(createdNode);
     }
 
@@ -1044,10 +1044,10 @@ void HandleFileChanged(StringHash eventType, VariantMap& eventData)
 {
     String filename = eventData["FileName"].GetString();
     BrowserFile@ file = GetBrowserFileFromPath(filename);
-    
+
     if (file is null)
     {
-        // TODO: new file logic when watchers are supported 
+        // TODO: new file logic when watchers are supported
         return;
     }
     else
@@ -1088,7 +1088,7 @@ int GetResourceType(StringHash fileType)
         return RESOURCE_TYPE_UNUSABLE;
     else if (fileType == BINARY_TYPE_COMPRESSED_PACKAGE)
         return RESOURCE_TYPE_UNUSABLE;
-    else if (fileType == BINARY_TYPE_ANGLESCRIPT)
+    else if (fileType == BINARY_TYPE_ANGELSCRIPT)
         return RESOURCE_TYPE_SCRIPTFILE;
     else if (fileType == BINARY_TYPE_MODEL || fileType == BINARY_TYPE_MODEL2)
         return RESOURCE_TYPE_MODEL;
@@ -1280,7 +1280,7 @@ bool GetExtensionType(String path, StringHash &out fileType)
 }
 
 bool GetBinaryType(String path, StringHash &out fileType, bool useCache = false)
-{   
+{
     StringHash type;
     if (useCache)
     {
@@ -1311,8 +1311,8 @@ bool GetBinaryType(String path, StringHash &out fileType, bool useCache = false)
         fileType = BINARY_TYPE_PACKAGE;
     else if (type == BINARY_TYPE_COMPRESSED_PACKAGE)
         fileType = BINARY_TYPE_COMPRESSED_PACKAGE;
-    else if (type == BINARY_TYPE_ANGLESCRIPT)
-        fileType = BINARY_TYPE_ANGLESCRIPT;
+    else if (type == BINARY_TYPE_ANGELSCRIPT)
+        fileType = BINARY_TYPE_ANGELSCRIPT;
     else if (type == BINARY_TYPE_MODEL || type == BINARY_TYPE_MODEL2)
         fileType = BINARY_TYPE_MODEL;
     else if (type == BINARY_TYPE_SHADER)
@@ -1327,6 +1327,8 @@ bool GetBinaryType(String path, StringHash &out fileType, bool useCache = false)
 
 bool GetXmlType(String path, StringHash &out fileType, bool useCache = false)
 {
+    if (GetFileName(path).length == 0)
+        return false; // .gitignore etc.
     String extension = GetExtension(path);
     if (extension == ".txt" || extension == ".json" || extension == ".icns" || extension == ".atlas")
         return false;
@@ -1548,7 +1550,7 @@ class BrowserFile
             InitializeBrowserFileListRow(browserFileListRow_, this);
         }
     }
-    
+
     String ResourceTypeName()
     {
         return ::ResourceTypeName(resourceType);
@@ -1568,7 +1570,7 @@ class BrowserFile
 void CreateResourcePreview(String path, Node@ previewNode)
 {
     resourceBrowserPreview.autoUpdate = false;
-    int resourceType = GetResourceType(path); 
+    int resourceType = GetResourceType(path);
     if (resourceType > 0)
     {
         File file;
@@ -1616,12 +1618,12 @@ void CreateResourcePreview(String path, Node@ previewNode)
             {
                 XMLFile xmlFile;
                 if(xmlFile.Load(file))
-                    if(previewNode.LoadXML(xmlFile.root, true) && (previewNode.GetComponents("StaticModel", true).length > 0 || previewNode.GetComponents("AnimatedModel", true).length > 0))
+                    if(previewNode.LoadXML(xmlFile.root) && (previewNode.GetComponents("StaticModel", true).length > 0 || previewNode.GetComponents("AnimatedModel", true).length > 0))
                     {
                         return;
                     }
             }
-            else if(previewNode.Load(file, true) && (previewNode.GetComponents("StaticModel", true).length > 0 || previewNode.GetComponents("AnimatedModel", true).length > 0))
+            else if(previewNode.Load(file) && (previewNode.GetComponents("StaticModel", true).length > 0 || previewNode.GetComponents("AnimatedModel", true).length > 0))
                 return;
 
             previewNode.RemoveAllChildren();
@@ -1658,7 +1660,7 @@ void RotateResourceBrowserPreview(StringHash eventType, VariantMap& eventData)
 {
     int elemX = eventData["ElementX"].GetInt();
     int elemY = eventData["ElementY"].GetInt();
-    
+
     if (resourceBrowserPreview.height > 0 && resourceBrowserPreview.width > 0)
     {
         float yaw = ((resourceBrowserPreview.height / 2) - elemY) * (90.0 / resourceBrowserPreview.height);

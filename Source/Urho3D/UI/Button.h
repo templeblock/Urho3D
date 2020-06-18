@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2016 the Urho3D project.
+// Copyright (c) 2008-2020 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,29 +34,29 @@ class URHO3D_API Button : public BorderImage
 
 public:
     /// Construct.
-    Button(Context* context);
+    explicit Button(Context* context);
     /// Destruct.
-    virtual ~Button();
+    ~Button() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
     /// Perform UI element update.
-    virtual void Update(float timeStep);
+    void Update(float timeStep) override;
     /// Return UI rendering batches.
-    virtual void GetBatches(PODVector<UIBatch>& batches, PODVector<float>& vertexData, const IntRect& currentScissor);
+    void GetBatches(PODVector<UIBatch>& batches, PODVector<float>& vertexData, const IntRect& currentScissor) override;
     /// React to mouse click begin.
-    virtual void OnClickBegin
-        (const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor);
+    void OnClickBegin
+        (const IntVector2& position, const IntVector2& screenPosition, MouseButton button, MouseButtonFlags buttons, QualifierFlags qualifiers, Cursor* cursor) override;
     /// React to mouse click end.
-    virtual void OnClickEnd
-        (const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers, Cursor* cursor,
-            UIElement* beginElement);
+    void OnClickEnd
+        (const IntVector2& position, const IntVector2& screenPosition, MouseButton button, MouseButtonFlags buttons, QualifierFlags qualifiers, Cursor* cursor,
+            UIElement* beginElement) override;
     /// React to mouse drag motion.
-    virtual void OnDragMove
-        (const IntVector2& position, const IntVector2& screenPosition, const IntVector2& deltaPos, int buttons, int qualifiers,
-            Cursor* cursor);
+    void OnDragMove
+        (const IntVector2& position, const IntVector2& screenPosition, const IntVector2& deltaPos, MouseButtonFlags buttons, QualifierFlags qualifiers,
+            Cursor* cursor) override;
     /// React to a key press.
-    virtual void OnKey(int key, int buttons, int qualifiers);
+    void OnKey(Key key, MouseButtonFlags buttons, QualifierFlags qualifiers) override;
 
     /// Set offset to image rectangle used when pressed.
     void SetPressedOffset(const IntVector2& offset);

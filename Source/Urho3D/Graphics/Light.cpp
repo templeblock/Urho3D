@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2016 the Urho3D project.
+// Copyright (c) 2008-2020 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -55,15 +55,18 @@ static const float DEFAULT_SHADOWFADESTART = 0.8f;
 static const float DEFAULT_SHADOWQUANTIZE = 0.5f;
 static const float DEFAULT_SHADOWMINVIEW = 3.0f;
 static const float DEFAULT_SHADOWNEARFARRATIO = 0.002f;
+static const float DEFAULT_SHADOWMAXEXTRUSION = 1000.0f;
 static const float DEFAULT_SHADOWSPLIT = 1000.0f;
 static const float DEFAULT_TEMPERATURE = 6590.0f;
+static const float DEFAULT_RADIUS = 0.0f;
+static const float DEFAULT_LENGTH = 0.0f;
 
 static const char* typeNames[] =
 {
     "Directional",
     "Spot",
     "Point",
-    0
+    nullptr
 };
 
 void BiasParameters::Validate()
@@ -92,8 +95,10 @@ Light::Light(Context* context) :
     shadowBias_(BiasParameters(DEFAULT_CONSTANTBIAS, DEFAULT_SLOPESCALEDBIAS)),
     shadowCascade_(CascadeParameters(DEFAULT_SHADOWSPLIT, 0.0f, 0.0f, 0.0f, DEFAULT_SHADOWFADESTART)),
     shadowFocus_(FocusParameters(true, true, true, DEFAULT_SHADOWQUANTIZE, DEFAULT_SHADOWMINVIEW)),
-    lightQueue_(0),
-    temperature_(6590.0f),
+    lightQueue_(nullptr),
+    temperature_(DEFAULT_TEMPERATURE),
+    lightRad_(DEFAULT_RADIUS),
+    lightLength_(DEFAULT_LENGTH),
     specularIntensity_(DEFAULT_SPECULARINTENSITY),
     brightness_(DEFAULT_BRIGHTNESS),
     range_(DEFAULT_RANGE),
@@ -104,14 +109,13 @@ Light::Light(Context* context) :
     shadowIntensity_(0.0f),
     shadowResolution_(1.0f),
     shadowNearFarRatio_(DEFAULT_SHADOWNEARFARRATIO),
+    shadowMaxExtrusion_(DEFAULT_SHADOWMAXEXTRUSION),
     perVertex_(false),
     usePhysicalValues_(false)
 {
 }
 
-Light::~Light()
-{
-}
+Light::~Light() = default;
 
 void Light::RegisterObject(Context* context)
 {
@@ -125,6 +129,8 @@ void Light::RegisterObject(Context* context)
     URHO3D_ACCESSOR_ATTRIBUTE("Brightness Multiplier", GetBrightness, SetBrightness, float, DEFAULT_BRIGHTNESS, AM_DEFAULT);
     URHO3D_ACCESSOR_ATTRIBUTE("Temperature", GetTemperature, SetTemperature, float, DEFAULT_TEMPERATURE, AM_DEFAULT);
     URHO3D_ATTRIBUTE("Use Physical Values", bool, usePhysicalValues_, false, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Radius", GetRadius, SetRadius, float, DEFAULT_RADIUS, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Length", GetLength, SetLength, float, DEFAULT_LENGTH, AM_DEFAULT);
     URHO3D_ACCESSOR_ATTRIBUTE("Range", GetRange, SetRange, float, DEFAULT_RANGE, AM_DEFAULT);
     URHO3D_ACCESSOR_ATTRIBUTE("Spot FOV", GetFov, SetFov, float, DEFAULT_LIGHT_FOV, AM_DEFAULT);
     URHO3D_ACCESSOR_ATTRIBUTE("Spot Aspect Ratio", GetAspectRatio, SetAspectRatio, float, 1.0f, AM_DEFAULT);
@@ -141,35 +147,21 @@ void Light::RegisterObject(Context* context)
     URHO3D_ACCESSOR_ATTRIBUTE("Shadow Fade Distance", GetShadowFadeDistance, SetShadowFadeDistance, float, 0.0f, AM_DEFAULT);
     URHO3D_ACCESSOR_ATTRIBUTE("Shadow Intensity", GetShadowIntensity, SetShadowIntensity, float, 0.0f, AM_DEFAULT);
     URHO3D_ACCESSOR_ATTRIBUTE("Shadow Resolution", GetShadowResolution, SetShadowResolution, float, 1.0f, AM_DEFAULT);
-    URHO3D_ATTRIBUTE("Focus To Scene", bool, shadowFocus_.focus_, true, AM_DEFAULT);
-    URHO3D_ATTRIBUTE("Non-uniform View", bool, shadowFocus_.nonUniform_, true, AM_DEFAULT);
-    URHO3D_ATTRIBUTE("Auto-Reduce Size", bool, shadowFocus_.autoSize_, true, AM_DEFAULT);
-    URHO3D_ATTRIBUTE("CSM Splits", Vector4, shadowCascade_.splits_, Vector4(DEFAULT_SHADOWSPLIT, 0.0f, 0.0f, 0.0f), AM_DEFAULT);
-    URHO3D_ATTRIBUTE("CSM Fade Start", float, shadowCascade_.fadeStart_, DEFAULT_SHADOWFADESTART, AM_DEFAULT);
-    URHO3D_ATTRIBUTE("CSM Bias Auto Adjust", float, shadowCascade_.biasAutoAdjust_, DEFAULT_BIASAUTOADJUST, AM_DEFAULT);
-    URHO3D_ATTRIBUTE("View Size Quantize", float, shadowFocus_.quantize_, DEFAULT_SHADOWQUANTIZE, AM_DEFAULT);
-    URHO3D_ATTRIBUTE("View Size Minimum", float, shadowFocus_.minView_, DEFAULT_SHADOWMINVIEW, AM_DEFAULT);
-    URHO3D_ATTRIBUTE("Depth Constant Bias", float, shadowBias_.constantBias_, DEFAULT_CONSTANTBIAS, AM_DEFAULT);
-    URHO3D_ATTRIBUTE("Depth Slope Bias", float, shadowBias_.slopeScaledBias_, DEFAULT_SLOPESCALEDBIAS, AM_DEFAULT);
-    URHO3D_ATTRIBUTE("Normal Offset", float, shadowBias_.normalOffset_, DEFAULT_NORMALOFFSET, AM_DEFAULT);
+    URHO3D_ATTRIBUTE_EX("Focus To Scene", bool, shadowFocus_.focus_, ValidateShadowFocus, true, AM_DEFAULT);
+    URHO3D_ATTRIBUTE_EX("Non-uniform View", bool, shadowFocus_.nonUniform_, ValidateShadowFocus, true, AM_DEFAULT);
+    URHO3D_ATTRIBUTE_EX("Auto-Reduce Size", bool, shadowFocus_.autoSize_, ValidateShadowFocus, true, AM_DEFAULT);
+    URHO3D_ATTRIBUTE_EX("CSM Splits", Vector4, shadowCascade_.splits_, ValidateShadowCascade, Vector4(DEFAULT_SHADOWSPLIT, 0.0f, 0.0f, 0.0f), AM_DEFAULT);
+    URHO3D_ATTRIBUTE_EX("CSM Fade Start", float, shadowCascade_.fadeStart_, ValidateShadowCascade, DEFAULT_SHADOWFADESTART, AM_DEFAULT);
+    URHO3D_ATTRIBUTE_EX("CSM Bias Auto Adjust", float, shadowCascade_.biasAutoAdjust_, ValidateShadowCascade, DEFAULT_BIASAUTOADJUST, AM_DEFAULT);
+    URHO3D_ATTRIBUTE_EX("View Size Quantize", float, shadowFocus_.quantize_, ValidateShadowFocus, DEFAULT_SHADOWQUANTIZE, AM_DEFAULT);
+    URHO3D_ATTRIBUTE_EX("View Size Minimum", float, shadowFocus_.minView_, ValidateShadowFocus, DEFAULT_SHADOWMINVIEW, AM_DEFAULT);
+    URHO3D_ATTRIBUTE_EX("Depth Constant Bias", float, shadowBias_.constantBias_, ValidateShadowBias, DEFAULT_CONSTANTBIAS, AM_DEFAULT);
+    URHO3D_ATTRIBUTE_EX("Depth Slope Bias", float, shadowBias_.slopeScaledBias_, ValidateShadowBias, DEFAULT_SLOPESCALEDBIAS, AM_DEFAULT);
+    URHO3D_ATTRIBUTE_EX("Normal Offset", float, shadowBias_.normalOffset_, ValidateShadowBias, DEFAULT_NORMALOFFSET, AM_DEFAULT);
     URHO3D_ATTRIBUTE("Near/Farclip Ratio", float, shadowNearFarRatio_, DEFAULT_SHADOWNEARFARRATIO, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Max Extrusion", GetShadowMaxExtrusion, SetShadowMaxExtrusion, float, DEFAULT_SHADOWMAXEXTRUSION, AM_DEFAULT);
     URHO3D_ATTRIBUTE("View Mask", int, viewMask_, DEFAULT_VIEWMASK, AM_DEFAULT);
     URHO3D_ATTRIBUTE("Light Mask", int, lightMask_, DEFAULT_LIGHTMASK, AM_DEFAULT);
-}
-
-void Light::OnSetAttribute(const AttributeInfo& attr, const Variant& src)
-{
-    Serializable::OnSetAttribute(attr, src);
-
-    // Validate the bias, cascade & focus parameters
-    if (attr.offset_ >= offsetof(Light, shadowBias_) && attr.offset_ < (offsetof(Light, shadowBias_) + sizeof(BiasParameters)))
-        shadowBias_.Validate();
-    else if (attr.offset_ >= offsetof(Light, shadowCascade_) &&
-             attr.offset_ < (offsetof(Light, shadowCascade_) + sizeof(CascadeParameters)))
-        shadowCascade_.Validate();
-    else if (attr.offset_ >= offsetof(Light, shadowFocus_) &&
-             attr.offset_ < (offsetof(Light, shadowFocus_) + sizeof(FocusParameters)))
-        shadowFocus_.Validate();
 }
 
 void Light::ProcessRayQuery(const RayOctreeQuery& query, PODVector<RayQueryResult>& results)
@@ -301,6 +293,18 @@ void Light::SetTemperature(float temperature)
     MarkNetworkUpdate();
 }
 
+void Light::SetRadius(float radius)
+{
+    lightRad_ = radius;
+    MarkNetworkUpdate();
+}
+
+void Light::SetLength(float length)
+{
+    lightLength_ = length;
+    MarkNetworkUpdate();
+}
+
 void Light::SetUsePhysicalValues(bool enable)
 {
     usePhysicalValues_ = enable;
@@ -343,6 +347,12 @@ void Light::SetAspectRatio(float aspectRatio)
 void Light::SetShadowNearFarRatio(float nearFarRatio)
 {
     shadowNearFarRatio_ = Clamp(nearFarRatio, 0.0f, 0.5f);
+    MarkNetworkUpdate();
+}
+
+void Light::SetShadowMaxExtrusion(float extrusion)
+{
+    shadowMaxExtrusion_ = Max(extrusion, 0.0f);
     MarkNetworkUpdate();
 }
 
@@ -509,13 +519,13 @@ const Matrix3x4& Light::GetVolumeTransform(Camera* camera)
 
 void Light::SetRampTextureAttr(const ResourceRef& value)
 {
-    ResourceCache* cache = GetSubsystem<ResourceCache>();
+    auto* cache = GetSubsystem<ResourceCache>();
     rampTexture_ = static_cast<Texture*>(cache->GetResource(value.type_, value.name_));
 }
 
 void Light::SetShapeTextureAttr(const ResourceRef& value)
 {
-    ResourceCache* cache = GetSubsystem<ResourceCache>();
+    auto* cache = GetSubsystem<ResourceCache>();
     shapeTexture_ = static_cast<Texture*>(cache->GetResource(value.type_, value.name_));
 }
 

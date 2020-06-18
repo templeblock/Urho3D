@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2016 the Urho3D project.
+// Copyright (c) 2008-2020 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@ namespace Urho3D
 class Color;
 class IntRect;
 class IntVector2;
+class IntVector3;
 class Quaternion;
 class Rect;
 class Vector2;
@@ -75,6 +76,8 @@ public:
     bool WriteIntRect(const IntRect& value);
     /// Write an IntVector2.
     bool WriteIntVector2(const IntVector2& value);
+    /// Write an IntVector3.
+    bool WriteIntVector3(const IntVector3& value);
     /// Write a Rect.
     bool WriteRect(const Rect& value);
     /// Write a Vector2.
@@ -106,7 +109,7 @@ public:
     /// Write a 32-bit StringHash.
     bool WriteStringHash(const StringHash& value);
     /// Write a buffer, with size encoded as VLE.
-    bool WriteBuffer(const PODVector<unsigned char>& buffer);
+    bool WriteBuffer(const PODVector<unsigned char>& value);
     /// Write a resource reference.
     bool WriteResourceRef(const ResourceRef& value);
     /// Write a resource reference list.

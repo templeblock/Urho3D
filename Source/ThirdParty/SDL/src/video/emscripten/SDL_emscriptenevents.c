@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2016 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2019 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -217,16 +217,16 @@ static const SDL_Scancode emscripten_scancode_table[] = {
     /* 171 */   SDL_SCANCODE_UNKNOWN,
     /* 172 */   SDL_SCANCODE_UNKNOWN,
     /* 173 */   SDL_SCANCODE_MINUS, /*FX*/
-    /* 174 */   SDL_SCANCODE_UNKNOWN,
-    /* 175 */   SDL_SCANCODE_UNKNOWN,
-    /* 176 */   SDL_SCANCODE_UNKNOWN,
-    /* 177 */   SDL_SCANCODE_UNKNOWN,
+    /* 174 */   SDL_SCANCODE_VOLUMEDOWN, /*IE, Chrome*/
+    /* 175 */   SDL_SCANCODE_VOLUMEUP, /*IE, Chrome*/
+    /* 176 */   SDL_SCANCODE_AUDIONEXT, /*IE, Chrome*/
+    /* 177 */   SDL_SCANCODE_AUDIOPREV, /*IE, Chrome*/
     /* 178 */   SDL_SCANCODE_UNKNOWN,
-    /* 179 */   SDL_SCANCODE_UNKNOWN,
+    /* 179 */   SDL_SCANCODE_AUDIOPLAY, /*IE, Chrome*/
     /* 180 */   SDL_SCANCODE_UNKNOWN,
-    /* 181 */   SDL_SCANCODE_UNKNOWN,
-    /* 182 */   SDL_SCANCODE_UNKNOWN,
-    /* 183 */   SDL_SCANCODE_UNKNOWN,
+    /* 181 */   SDL_SCANCODE_AUDIOMUTE, /*FX*/
+    /* 182 */   SDL_SCANCODE_VOLUMEDOWN, /*FX*/
+    /* 183 */   SDL_SCANCODE_VOLUMEUP, /*FX*/
     /* 184 */   SDL_SCANCODE_UNKNOWN,
     /* 185 */   SDL_SCANCODE_UNKNOWN,
     /* 186 */   SDL_SCANCODE_SEMICOLON, /*IE, Chrome, D3E legacy*/
@@ -270,7 +270,7 @@ static const SDL_Scancode emscripten_scancode_table[] = {
 
 
 /* "borrowed" from SDL_windowsevents.c */
-int
+static int
 Emscripten_ConvertUTF32toUTF8(Uint32 codepoint, char * text)
 {
     if (codepoint <= 0x7F) {
@@ -297,37 +297,56 @@ Emscripten_ConvertUTF32toUTF8(Uint32 codepoint, char * text)
     return SDL_TRUE;
 }
 
-EM_BOOL
-Emscripten_HandleMouseMove(int eventType, const EmscriptenMouseEvent *mouseEvent, void *userData)
+static EM_BOOL
+Emscripten_HandlePointerLockChange(int eventType, const EmscriptenPointerlockChangeEvent *changeEvent, void *userData)
 {
-    SDL_WindowData *window_data = userData;
-    int mx = mouseEvent->canvasX, my = mouseEvent->canvasY;
-    EmscriptenPointerlockChangeEvent pointerlock_status;
-
-    /* check for pointer lock */
-    emscripten_get_pointerlock_status(&pointerlock_status);
-
-    if (pointerlock_status.isActive) {
-        mx = mouseEvent->movementX;
-        my = mouseEvent->movementY;
-    }
-
-    /* rescale (in case canvas is being scaled)*/
-    double client_w, client_h;
-    emscripten_get_element_css_size(NULL, &client_w, &client_h);
-
-    mx = mx * (window_data->window->w / (client_w * window_data->pixel_ratio));
-    my = my * (window_data->window->h / (client_h * window_data->pixel_ratio));
-
-    SDL_SendMouseMotion(window_data->window, 0, pointerlock_status.isActive, mx, my);
+    SDL_WindowData *window_data = (SDL_WindowData *) userData;
+    /* keep track of lock losses, so we can regrab if/when appropriate. */
+    window_data->has_pointer_lock = changeEvent->isActive;
     return 0;
 }
 
-EM_BOOL
+
+static EM_BOOL
+Emscripten_HandleMouseMove(int eventType, const EmscriptenMouseEvent *mouseEvent, void *userData)
+{
+    SDL_WindowData *window_data = userData;
+    const int isPointerLocked = window_data->has_pointer_lock;
+    int mx, my;
+    static double residualx = 0, residualy = 0;
+
+    /* rescale (in case canvas is being scaled)*/
+    double client_w, client_h, xscale, yscale;
+    emscripten_get_element_css_size(window_data->canvas_id, &client_w, &client_h);
+    xscale = window_data->window->w / client_w;
+    yscale = window_data->window->h / client_h;
+
+    if (isPointerLocked) {
+        residualx += mouseEvent->movementX * xscale;
+        residualy += mouseEvent->movementY * yscale;
+        /* Let slow sub-pixel motion accumulate. Don't lose it. */
+        mx = residualx;
+        residualx -= mx;
+        my = residualy;
+        residualy -= my;
+    } else {
+        mx = mouseEvent->targetX * xscale;
+        my = mouseEvent->targetY * yscale;
+    }
+
+    SDL_SendMouseMotion(window_data->window, 0, isPointerLocked, mx, my);
+    return 0;
+}
+
+static EM_BOOL
 Emscripten_HandleMouseButton(int eventType, const EmscriptenMouseEvent *mouseEvent, void *userData)
 {
     SDL_WindowData *window_data = userData;
-    uint32_t sdl_button;
+    Uint8 sdl_button;
+    Uint8 sdl_button_state;
+    SDL_EventType sdl_event_type;
+    double css_w, css_h;
+
     switch (mouseEvent->button) {
         case 0:
             sdl_button = SDL_BUTTON_LEFT;
@@ -341,44 +360,88 @@ Emscripten_HandleMouseButton(int eventType, const EmscriptenMouseEvent *mouseEve
         default:
             return 0;
     }
-    SDL_SendMouseButton(window_data->window, 0, eventType == EMSCRIPTEN_EVENT_MOUSEDOWN ? SDL_PRESSED : SDL_RELEASED, sdl_button);
-    return 1;
+
+    if (eventType == EMSCRIPTEN_EVENT_MOUSEDOWN) {
+        if (SDL_GetMouse()->relative_mode && !window_data->has_pointer_lock) {
+            emscripten_request_pointerlock(NULL, 0);  /* try to regrab lost pointer lock. */
+        }
+        sdl_button_state = SDL_PRESSED;
+        sdl_event_type = SDL_MOUSEBUTTONDOWN;
+    } else {
+        sdl_button_state = SDL_RELEASED;
+        sdl_event_type = SDL_MOUSEBUTTONUP;
+    }
+    SDL_SendMouseButton(window_data->window, 0, sdl_button_state, sdl_button);
+
+    /* Do not consume the event if the mouse is outside of the canvas. */
+    emscripten_get_element_css_size(window_data->canvas_id, &css_w, &css_h);
+    if (mouseEvent->targetX < 0 || mouseEvent->targetX >= css_w ||
+        mouseEvent->targetY < 0 || mouseEvent->targetY >= css_h) {
+        return 0;
+    }
+
+    return SDL_GetEventState(sdl_event_type) == SDL_ENABLE;
 }
 
-EM_BOOL
+static EM_BOOL
 Emscripten_HandleMouseFocus(int eventType, const EmscriptenMouseEvent *mouseEvent, void *userData)
 {
     SDL_WindowData *window_data = userData;
-    SDL_SendWindowEvent(window_data->window, eventType == EMSCRIPTEN_EVENT_MOUSEENTER ? SDL_WINDOWEVENT_ENTER : SDL_WINDOWEVENT_LEAVE, 0, 0);
-    return 1;
+
+    int mx = mouseEvent->targetX, my = mouseEvent->targetY;
+    const int isPointerLocked = window_data->has_pointer_lock;
+
+    if (!isPointerLocked) {
+        /* rescale (in case canvas is being scaled)*/
+        double client_w, client_h;
+        emscripten_get_element_css_size(window_data->canvas_id, &client_w, &client_h);
+
+        mx = mx * (window_data->window->w / client_w);
+        my = my * (window_data->window->h / client_h);
+        SDL_SendMouseMotion(window_data->window, 0, isPointerLocked, mx, my);
+    }
+
+    SDL_SetMouseFocus(eventType == EMSCRIPTEN_EVENT_MOUSEENTER ? window_data->window : NULL);
+    return SDL_GetEventState(SDL_WINDOWEVENT) == SDL_ENABLE;
 }
 
-EM_BOOL
+static EM_BOOL
 Emscripten_HandleWheel(int eventType, const EmscriptenWheelEvent *wheelEvent, void *userData)
 {
     SDL_WindowData *window_data = userData;
-    SDL_SendMouseWheel(window_data->window, 0, wheelEvent->deltaX, -wheelEvent->deltaY, SDL_MOUSEWHEEL_NORMAL);
-    return 1;
+    SDL_SendMouseWheel(window_data->window, 0, (float)wheelEvent->deltaX, (float)-wheelEvent->deltaY, SDL_MOUSEWHEEL_NORMAL);
+    return SDL_GetEventState(SDL_MOUSEWHEEL) == SDL_ENABLE;
 }
 
-EM_BOOL
+static EM_BOOL
 Emscripten_HandleFocus(int eventType, const EmscriptenFocusEvent *wheelEvent, void *userData)
 {
     SDL_WindowData *window_data = userData;
+    /* If the user switches away while keys are pressed (such as
+     * via Alt+Tab), key release events won't be received. */
+    if (eventType == EMSCRIPTEN_EVENT_BLUR) {
+        SDL_ResetKeyboard();
+    }
+
+
     SDL_SendWindowEvent(window_data->window, eventType == EMSCRIPTEN_EVENT_FOCUS ? SDL_WINDOWEVENT_FOCUS_GAINED : SDL_WINDOWEVENT_FOCUS_LOST, 0, 0);
-    return 1;
+    return SDL_GetEventState(SDL_WINDOWEVENT) == SDL_ENABLE;
 }
 
-EM_BOOL
+static EM_BOOL
 Emscripten_HandleTouch(int eventType, const EmscriptenTouchEvent *touchEvent, void *userData)
 {
-    SDL_WindowData *window_data = userData;
+    SDL_WindowData *window_data = (SDL_WindowData *) userData;
     int i;
+    double client_w, client_h;
+    int preventDefault = 0;
 
     SDL_TouchID deviceId = 1;
-    if (SDL_AddTouch(deviceId, "") < 0) {
+    if (SDL_AddTouch(deviceId, SDL_TOUCH_DEVICE_DIRECT, "") < 0) {
          return 0;
     }
+
+    emscripten_get_element_css_size(window_data->canvas_id, &client_w, &client_h);
 
     for (i = 0; i < touchEvent->numTouches; i++) {
         SDL_FingerID id;
@@ -388,26 +451,35 @@ Emscripten_HandleTouch(int eventType, const EmscriptenTouchEvent *touchEvent, vo
             continue;
 
         id = touchEvent->touches[i].identifier;
-        x = touchEvent->touches[i].canvasX / (float)window_data->windowed_width;
-        y = touchEvent->touches[i].canvasY / (float)window_data->windowed_height;
+        x = touchEvent->touches[i].targetX / client_w;
+        y = touchEvent->touches[i].targetY / client_h;
 
-        if (eventType == EMSCRIPTEN_EVENT_TOUCHMOVE) {
-            SDL_SendTouchMotion(deviceId, id, x, y, 1.0f);
-        } else if (eventType == EMSCRIPTEN_EVENT_TOUCHSTART) {
+        if (eventType == EMSCRIPTEN_EVENT_TOUCHSTART) {
             SDL_SendTouch(deviceId, id, SDL_TRUE, x, y, 1.0f);
+
+            /* disable browser scrolling/pinch-to-zoom if app handles touch events */
+            if (!preventDefault && SDL_GetEventState(SDL_FINGERDOWN) == SDL_ENABLE) {
+                preventDefault = 1;
+            }
+        } else if (eventType == EMSCRIPTEN_EVENT_TOUCHMOVE) {
+            SDL_SendTouchMotion(deviceId, id, x, y, 1.0f);
         } else {
             SDL_SendTouch(deviceId, id, SDL_FALSE, x, y, 1.0f);
+
+            /* block browser's simulated mousedown/mouseup on touchscreen devices */
+            preventDefault = 1;
         }
     }
 
-
-    return 1;
+    return preventDefault;
 }
 
-EM_BOOL
+static EM_BOOL
 Emscripten_HandleKey(int eventType, const EmscriptenKeyboardEvent *keyEvent, void *userData)
 {
     Uint32 scancode;
+    SDL_bool prevent_default;
+    SDL_bool is_nav_key;
 
     /* .keyCode is deprecated, but still the most reliable way to get keys */
     if (keyEvent->keyCode < SDL_arraysize(emscripten_scancode_table)) {
@@ -431,105 +503,83 @@ Emscripten_HandleKey(int eventType, const EmscriptenKeyboardEvent *keyEvent, voi
                         break;
                 }
             }
-            SDL_SendKeyboardKey(eventType == EMSCRIPTEN_EVENT_KEYDOWN ?
-                                SDL_PRESSED : SDL_RELEASED, scancode);
+            SDL_SendKeyboardKey(eventType == EMSCRIPTEN_EVENT_KEYDOWN ? SDL_PRESSED : SDL_RELEASED, scancode);
         }
     }
 
-    /* if we prevent keydown, we won't get keypress
-     * also we need to ALWAYS prevent backspace and tab otherwise chrome takes action and does bad navigation UX
+    prevent_default = SDL_GetEventState(eventType == EMSCRIPTEN_EVENT_KEYDOWN ? SDL_KEYDOWN : SDL_KEYUP) == SDL_ENABLE;
+
+    /* if TEXTINPUT events are enabled we can't prevent keydown or we won't get keypress
+     * we need to ALWAYS prevent backspace and tab otherwise chrome takes action and does bad navigation UX
      */
-    return SDL_GetEventState(SDL_TEXTINPUT) != SDL_ENABLE || eventType != EMSCRIPTEN_EVENT_KEYDOWN
-            || keyEvent->keyCode == 8 /* backspace */ || keyEvent->keyCode == 9 /* tab */;
+    is_nav_key = keyEvent->keyCode == 8 /* backspace */ ||
+                 keyEvent->keyCode == 9 /* tab */ ||
+                 keyEvent->keyCode == 37 /* left */ ||
+                 keyEvent->keyCode == 38 /* up */ ||
+                 keyEvent->keyCode == 39 /* right */ ||
+                 keyEvent->keyCode == 40 /* down */;
+
+    if (eventType == EMSCRIPTEN_EVENT_KEYDOWN && SDL_GetEventState(SDL_TEXTINPUT) == SDL_ENABLE && !is_nav_key)
+        prevent_default = SDL_FALSE;
+
+    return prevent_default;
 }
 
-EM_BOOL
+static EM_BOOL
 Emscripten_HandleKeyPress(int eventType, const EmscriptenKeyboardEvent *keyEvent, void *userData)
 {
     char text[5];
     if (Emscripten_ConvertUTF32toUTF8(keyEvent->charCode, text)) {
         SDL_SendKeyboardText(text);
     }
-    return 1;
+    return SDL_GetEventState(SDL_TEXTINPUT) == SDL_ENABLE;
 }
 
-EM_BOOL
+static EM_BOOL
 Emscripten_HandleFullscreenChange(int eventType, const EmscriptenFullscreenChangeEvent *fullscreenChangeEvent, void *userData)
 {
-    /*make sure this is actually our element going fullscreen*/
-    if(SDL_strcmp(fullscreenChangeEvent->id, "SDLFullscreenElement") != 0)
-        return 0;
-
     SDL_WindowData *window_data = userData;
+    SDL_VideoDisplay *display;
+
     if(fullscreenChangeEvent->isFullscreen)
     {
-        SDL_bool is_desktop_fullscreen;
         window_data->window->flags |= window_data->requested_fullscreen_mode;
-
-        if(!window_data->requested_fullscreen_mode)
-            window_data->window->flags |= SDL_WINDOW_FULLSCREEN_DESKTOP; /*we didn't reqest fullscreen*/
 
         window_data->requested_fullscreen_mode = 0;
 
-        is_desktop_fullscreen = (window_data->window->flags & SDL_WINDOW_FULLSCREEN_DESKTOP) == SDL_WINDOW_FULLSCREEN_DESKTOP;
-
-        /*update size*/
-        if(window_data->window->flags & SDL_WINDOW_RESIZABLE || is_desktop_fullscreen)
-        {
-            emscripten_set_canvas_size(fullscreenChangeEvent->screenWidth, fullscreenChangeEvent->screenHeight);
-            SDL_SendWindowEvent(window_data->window, SDL_WINDOWEVENT_RESIZED, fullscreenChangeEvent->screenWidth, fullscreenChangeEvent->screenHeight);
-        }
-        else
-        {
-            /*preserve ratio*/
-            double w = window_data->window->w;
-            double h = window_data->window->h;
-            double factor = SDL_min(fullscreenChangeEvent->screenWidth / w, fullscreenChangeEvent->screenHeight / h);
-            emscripten_set_element_css_size(NULL, w * factor, h * factor);
-        }
+        if(!window_data->requested_fullscreen_mode)
+            window_data->window->flags |= SDL_WINDOW_FULLSCREEN; /*we didn't reqest fullscreen*/
     }
     else
     {
-        EM_ASM({
-            //un-reparent canvas (similar to Module.requestFullscreen)
-            var canvas = Module['canvas'];
-            if(canvas.parentNode.id == "SDLFullscreenElement") {
-                var canvasContainer = canvas.parentNode;
-                canvasContainer.parentNode.insertBefore(canvas, canvasContainer);
-                canvasContainer.parentNode.removeChild(canvasContainer);
-            }
-        });
-        double unscaled_w = window_data->windowed_width / window_data->pixel_ratio;
-        double unscaled_h = window_data->windowed_height / window_data->pixel_ratio;
-        emscripten_set_canvas_size(window_data->windowed_width, window_data->windowed_height);
-
-        if (!window_data->external_size && window_data->pixel_ratio != 1.0f) {
-            emscripten_set_element_css_size(NULL, unscaled_w, unscaled_h);
-        }
-
-        SDL_SendWindowEvent(window_data->window, SDL_WINDOWEVENT_RESIZED, unscaled_w, unscaled_h);
-
         window_data->window->flags &= ~FULLSCREEN_MASK;
+
+        /* reset fullscreen window if the browser left fullscreen */
+        display = SDL_GetDisplayForWindow(window_data->window);
+
+        if (display->fullscreen_window == window_data->window) {
+            display->fullscreen_window = NULL;
+        }
     }
 
     return 0;
 }
 
-EM_BOOL
+static EM_BOOL
 Emscripten_HandleResize(int eventType, const EmscriptenUiEvent *uiEvent, void *userData)
 {
     SDL_WindowData *window_data = userData;
-    if(window_data->window->flags & FULLSCREEN_MASK)
-    {
-        SDL_bool is_desktop_fullscreen = (window_data->window->flags & SDL_WINDOW_FULLSCREEN_DESKTOP) == SDL_WINDOW_FULLSCREEN_DESKTOP;
+    SDL_bool force = SDL_FALSE;
 
-        if(window_data->window->flags & SDL_WINDOW_RESIZABLE || is_desktop_fullscreen)
-        {
-            emscripten_set_canvas_size(uiEvent->windowInnerWidth * window_data->pixel_ratio, uiEvent->windowInnerHeight * window_data->pixel_ratio);
-            SDL_SendWindowEvent(window_data->window, SDL_WINDOWEVENT_RESIZED, uiEvent->windowInnerWidth, uiEvent->windowInnerHeight);
+    /* update pixel ratio */
+    if (window_data->window->flags & SDL_WINDOW_ALLOW_HIGHDPI) {
+        if (window_data->pixel_ratio != emscripten_get_device_pixel_ratio()) {
+            window_data->pixel_ratio = emscripten_get_device_pixel_ratio();
+            force = SDL_TRUE;
         }
     }
-    else
+
+    if(!(window_data->window->flags & FULLSCREEN_MASK))
     {
         /* this will only work if the canvas size is set through css */
         if(window_data->window->flags & SDL_WINDOW_RESIZABLE)
@@ -538,14 +588,20 @@ Emscripten_HandleResize(int eventType, const EmscriptenUiEvent *uiEvent, void *u
             double h = window_data->window->h;
 
             if(window_data->external_size) {
-                emscripten_get_element_css_size(NULL, &w, &h);
+                emscripten_get_element_css_size(window_data->canvas_id, &w, &h);
             }
 
-            emscripten_set_canvas_size(w * window_data->pixel_ratio, h * window_data->pixel_ratio);
+            emscripten_set_canvas_element_size(window_data->canvas_id, w * window_data->pixel_ratio, h * window_data->pixel_ratio);
 
             /* set_canvas_size unsets this */
             if (!window_data->external_size && window_data->pixel_ratio != 1.0f) {
-                emscripten_set_element_css_size(NULL, w, h);
+                emscripten_set_element_css_size(window_data->canvas_id, w, h);
+            }
+
+            if (force) {
+               /* force the event to trigger, so pixel ratio changes can be handled */
+               window_data->window->w = 0;
+               window_data->window->h = 0;
             }
 
             SDL_SendWindowEvent(window_data->window, SDL_WINDOWEVENT_RESIZED, w, h);
@@ -556,6 +612,22 @@ Emscripten_HandleResize(int eventType, const EmscriptenUiEvent *uiEvent, void *u
 }
 
 EM_BOOL
+Emscripten_HandleCanvasResize(int eventType, const void *reserved, void *userData)
+{
+    /*this is used during fullscreen changes*/
+    SDL_WindowData *window_data = userData;
+
+    if(window_data->fullscreen_resize)
+    {
+        double css_w, css_h;
+        emscripten_get_element_css_size(window_data->canvas_id, &css_w, &css_h);
+        SDL_SendWindowEvent(window_data->window, SDL_WINDOWEVENT_RESIZED, css_w, css_h);
+    }
+
+    return 0;
+}
+
+static EM_BOOL
 Emscripten_HandleVisibilityChange(int eventType, const EmscriptenVisibilityChangeEvent *visEvent, void *userData)
 {
     SDL_WindowData *window_data = userData;
@@ -566,36 +638,40 @@ Emscripten_HandleVisibilityChange(int eventType, const EmscriptenVisibilityChang
 void
 Emscripten_RegisterEventHandlers(SDL_WindowData *data)
 {
+    const char *keyElement;
+
     /* There is only one window and that window is the canvas */
-    emscripten_set_mousemove_callback("#canvas", data, 0, Emscripten_HandleMouseMove);
+    emscripten_set_mousemove_callback(data->canvas_id, data, 0, Emscripten_HandleMouseMove);
 
-    emscripten_set_mousedown_callback("#canvas", data, 0, Emscripten_HandleMouseButton);
-    emscripten_set_mouseup_callback("#canvas", data, 0, Emscripten_HandleMouseButton);
+    emscripten_set_mousedown_callback(data->canvas_id, data, 0, Emscripten_HandleMouseButton);
+    emscripten_set_mouseup_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, data, 0, Emscripten_HandleMouseButton);
 
-    emscripten_set_mouseenter_callback("#canvas", data, 0, Emscripten_HandleMouseFocus);
-    emscripten_set_mouseleave_callback("#canvas", data, 0, Emscripten_HandleMouseFocus);
+    emscripten_set_mouseenter_callback(data->canvas_id, data, 0, Emscripten_HandleMouseFocus);
+    emscripten_set_mouseleave_callback(data->canvas_id, data, 0, Emscripten_HandleMouseFocus);
 
-    emscripten_set_wheel_callback("#canvas", data, 0, Emscripten_HandleWheel);
+    emscripten_set_wheel_callback(data->canvas_id, data, 0, Emscripten_HandleWheel);
 
-    emscripten_set_focus_callback("#canvas", data, 0, Emscripten_HandleFocus);
-    emscripten_set_blur_callback("#canvas", data, 0, Emscripten_HandleFocus);
+    emscripten_set_focus_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, data, 0, Emscripten_HandleFocus);
+    emscripten_set_blur_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, data, 0, Emscripten_HandleFocus);
 
-    emscripten_set_touchstart_callback("#canvas", data, 0, Emscripten_HandleTouch);
-    emscripten_set_touchend_callback("#canvas", data, 0, Emscripten_HandleTouch);
-    emscripten_set_touchmove_callback("#canvas", data, 0, Emscripten_HandleTouch);
-    emscripten_set_touchcancel_callback("#canvas", data, 0, Emscripten_HandleTouch);
+    emscripten_set_touchstart_callback(data->canvas_id, data, 0, Emscripten_HandleTouch);
+    emscripten_set_touchend_callback(data->canvas_id, data, 0, Emscripten_HandleTouch);
+    emscripten_set_touchmove_callback(data->canvas_id, data, 0, Emscripten_HandleTouch);
+    emscripten_set_touchcancel_callback(data->canvas_id, data, 0, Emscripten_HandleTouch);
+
+    emscripten_set_pointerlockchange_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, data, 0, Emscripten_HandlePointerLockChange);
 
     /* Keyboard events are awkward */
-    const char *keyElement = SDL_GetHint(SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT);
-    if (!keyElement) keyElement = "#window";
+    keyElement = SDL_GetHint(SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT);
+    if (!keyElement) keyElement = EMSCRIPTEN_EVENT_TARGET_WINDOW;
 
     emscripten_set_keydown_callback(keyElement, data, 0, Emscripten_HandleKey);
     emscripten_set_keyup_callback(keyElement, data, 0, Emscripten_HandleKey);
     emscripten_set_keypress_callback(keyElement, data, 0, Emscripten_HandleKeyPress);
 
-    emscripten_set_fullscreenchange_callback("#document", data, 0, Emscripten_HandleFullscreenChange);
+    emscripten_set_fullscreenchange_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, data, 0, Emscripten_HandleFullscreenChange);
 
-    emscripten_set_resize_callback("#window", data, 0, Emscripten_HandleResize);
+    emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, data, 0, Emscripten_HandleResize);
 
     emscripten_set_visibilitychange_callback(data, 0, Emscripten_HandleVisibilityChange);
 }
@@ -603,38 +679,41 @@ Emscripten_RegisterEventHandlers(SDL_WindowData *data)
 void
 Emscripten_UnregisterEventHandlers(SDL_WindowData *data)
 {
+    const char *target;
+
     /* only works due to having one window */
-    emscripten_set_mousemove_callback("#canvas", NULL, 0, NULL);
+    emscripten_set_mousemove_callback(data->canvas_id, NULL, 0, NULL);
 
-    emscripten_set_mousedown_callback("#canvas", NULL, 0, NULL);
-    emscripten_set_mouseup_callback("#canvas", NULL, 0, NULL);
+    emscripten_set_mousedown_callback(data->canvas_id, NULL, 0, NULL);
+    emscripten_set_mouseup_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, NULL, 0, NULL);
 
-    emscripten_set_mouseenter_callback("#canvas", NULL, 0, NULL);
-    emscripten_set_mouseleave_callback("#canvas", NULL, 0, NULL);
+    emscripten_set_mouseenter_callback(data->canvas_id, NULL, 0, NULL);
+    emscripten_set_mouseleave_callback(data->canvas_id, NULL, 0, NULL);
 
-    emscripten_set_wheel_callback("#canvas", NULL, 0, NULL);
+    emscripten_set_wheel_callback(data->canvas_id, NULL, 0, NULL);
 
-    emscripten_set_focus_callback("#canvas", NULL, 0, NULL);
-    emscripten_set_blur_callback("#canvas", NULL, 0, NULL);
+    emscripten_set_focus_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, 0, NULL);
+    emscripten_set_blur_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, 0, NULL);
 
-    emscripten_set_touchstart_callback("#canvas", NULL, 0, NULL);
-    emscripten_set_touchend_callback("#canvas", NULL, 0, NULL);
-    emscripten_set_touchmove_callback("#canvas", NULL, 0, NULL);
-    emscripten_set_touchcancel_callback("#canvas", NULL, 0, NULL);
+    emscripten_set_touchstart_callback(data->canvas_id, NULL, 0, NULL);
+    emscripten_set_touchend_callback(data->canvas_id, NULL, 0, NULL);
+    emscripten_set_touchmove_callback(data->canvas_id, NULL, 0, NULL);
+    emscripten_set_touchcancel_callback(data->canvas_id, NULL, 0, NULL);
 
-    const char *target = SDL_GetHint(SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT);
+    emscripten_set_pointerlockchange_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, NULL, 0, NULL);
+
+    target = SDL_GetHint(SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT);
     if (!target) {
-        target = "#window";
+        target = EMSCRIPTEN_EVENT_TARGET_WINDOW;
     }
 
     emscripten_set_keydown_callback(target, NULL, 0, NULL);
     emscripten_set_keyup_callback(target, NULL, 0, NULL);
-
     emscripten_set_keypress_callback(target, NULL, 0, NULL);
 
-    emscripten_set_fullscreenchange_callback("#document", NULL, 0, NULL);
+    emscripten_set_fullscreenchange_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT, NULL, 0, NULL);
 
-    emscripten_set_resize_callback("#window", NULL, 0, NULL);
+    emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, 0, NULL);
 
     emscripten_set_visibilitychange_callback(NULL, 0, NULL);
 }

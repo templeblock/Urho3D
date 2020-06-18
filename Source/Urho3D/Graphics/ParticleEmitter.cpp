@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2016 the Urho3D project.
+// Copyright (c) 2008-2020 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -58,9 +58,7 @@ ParticleEmitter::ParticleEmitter(Context* context) :
     SetNumParticles(DEFAULT_NUM_PARTICLES);
 }
 
-ParticleEmitter::~ParticleEmitter()
-{
-}
+ParticleEmitter::~ParticleEmitter() = default;
 
 void ParticleEmitter::RegisterObject(Context* context)
 {
@@ -287,8 +285,6 @@ void ParticleEmitter::SetNumParticles(unsigned num)
     // Prevent negative value being assigned from the editor
     if (num > M_MAX_INT)
         num = 0;
-    if (num > MAX_BILLBOARDS)
-        num = MAX_BILLBOARDS;
 
     particles_.Resize(num);
     SetNumBillboards(num);
@@ -299,7 +295,9 @@ void ParticleEmitter::SetEmitting(bool enable)
     if (enable != emitting_)
     {
         emitting_ = enable;
-        sendFinishedEvent_ = enable;
+
+        // If stopping emission now, and there are active particles, send finish event once they are gone
+        sendFinishedEvent_ = enable || CheckActiveParticles();
         periodTimer_ = 0.0f;
         // Note: network update does not need to be marked as this is a file only attribute
     }
@@ -359,7 +357,7 @@ ParticleEffect* ParticleEmitter::GetEffect() const
 
 void ParticleEmitter::SetEffectAttr(const ResourceRef& value)
 {
-    ResourceCache* cache = GetSubsystem<ResourceCache>();
+    auto* cache = GetSubsystem<ResourceCache>();
     SetEffect(cache->GetResource<ParticleEffect>(value.name_));
 }
 
@@ -486,6 +484,33 @@ bool ParticleEmitter::EmitNewParticle()
             );
         }
         break;
+
+    case EMITTER_SPHEREVOLUME:
+        {
+            Vector3 dir(
+                Random(2.0f) - 1.0f,
+                Random(2.0f) - 1.0f,
+                Random(2.0f) - 1.0f
+            );
+            dir.Normalize();
+            startPos = effect_->GetEmitterSize() * dir * Pow(Random(), 1.0f / 3.0f) * 0.5f;
+        }
+        break;
+
+    case EMITTER_CYLINDER:
+        {
+            float angle = Random(360.0f);
+            float radius = Sqrt(Random()) * 0.5f;
+            startPos = Vector3(Cos(angle) * radius, Random() - 0.5f, Sin(angle) * radius) * effect_->GetEmitterSize();
+        }
+        break;
+
+    case EMITTER_RING:
+        {
+            float angle = Random(360.0f);
+            startPos = Vector3(Cos(angle), Random(2.0f) - 1.0f, Sin(angle)) * effect_->GetEmitterSize() * 0.5f;
+        }
+        break;
     }
 
     particle.size_ = effect_->GetRandomSize();
@@ -533,6 +558,20 @@ unsigned ParticleEmitter::GetFreeParticle() const
     return M_MAX_UNSIGNED;
 }
 
+bool ParticleEmitter::CheckActiveParticles() const
+{
+    for (unsigned i = 0; i < billboards_.Size(); ++i)
+    {
+        if (billboards_[i].enabled_)
+        {
+            return true;
+            break;
+        }
+    }
+
+    return false;
+}
+
 void ParticleEmitter::HandleScenePostUpdate(StringHash eventType, VariantMap& eventData)
 {
     // Store scene's timestep and use it instead of global timestep, as time scale may be other than 1
@@ -548,40 +587,26 @@ void ParticleEmitter::HandleScenePostUpdate(StringHash eventType, VariantMap& ev
         MarkForUpdate();
     }
 
-    if (node_ && !emitting_ && sendFinishedEvent_)
+    // Send finished event only once all particles are gone
+    if (node_ && !emitting_ && sendFinishedEvent_ && !CheckActiveParticles())
     {
-        // Send finished event only once all billboards are gone
-        bool hasEnabledBillboards = false;
+        sendFinishedEvent_ = false;
 
-        for (unsigned i = 0; i < billboards_.Size(); ++i)
-        {
-            if (billboards_[i].enabled_)
-            {
-                hasEnabledBillboards = true;
-                break;
-            }
-        }
+        // Make a weak pointer to self to check for destruction during event handling
+        WeakPtr<ParticleEmitter> self(this);
 
-        if (!hasEnabledBillboards)
-        {
-            sendFinishedEvent_ = false;
+        using namespace ParticleEffectFinished;
 
-            // Make a weak pointer to self to check for destruction during event handling
-            WeakPtr<ParticleEmitter> self(this);
+        VariantMap& eventData = GetEventDataMap();
+        eventData[P_NODE] = node_;
+        eventData[P_EFFECT] = effect_;
 
-            using namespace ParticleEffectFinished;
+        node_->SendEvent(E_PARTICLEEFFECTFINISHED, eventData);
 
-            VariantMap& eventData = GetEventDataMap();
-            eventData[P_NODE] = node_;
-            eventData[P_EFFECT] = effect_;
+        if (self.Expired())
+            return;
 
-            node_->SendEvent(E_PARTICLEEFFECTFINISHED, eventData);
-
-            if (self.Expired())
-                return;
-
-            DoAutoRemove(autoRemove_);
-        }
+        DoAutoRemove(autoRemove_);
     }
 }
 

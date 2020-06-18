@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2008-2016 the Urho3D project.
+# Copyright (c) 2008-2020 the Urho3D project.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,13 @@
 # Define target name
 set (TARGET_NAME AngelScript)
 
+# Define preprocessor macros
+if (CLANG_PRE_STANDARD)
+    add_definitions (-DCLANG_PRE_STANDARD)
+endif ()
+if (NOT EXCEPTIONS)
+    add_definitions (-DAS_NO_EXCEPTIONS)
+endif ()
 # Add compiler define to build the library with the normal function/method macros
 add_definitions (-DAS_IS_BUILDING)
 

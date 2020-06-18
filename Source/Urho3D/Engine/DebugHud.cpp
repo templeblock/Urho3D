@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2016 the Urho3D project.
+// Copyright (c) 2008-2020 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -45,7 +45,8 @@ static const char* qualityTexts[] =
 {
     "Low",
     "Med",
-    "High"
+    "High",
+    "High+"
 };
 
 static const char* shadowQualityTexts[] =
@@ -65,7 +66,7 @@ DebugHud::DebugHud(Context* context) :
     useRendererStats_(false),
     mode_(DEBUGHUD_SHOW_NONE)
 {
-    UI* ui = GetSubsystem<UI>();
+    auto* ui = GetSubsystem<UI>();
     UIElement* uiRoot = ui->GetRoot();
 
     statsText_ = new Text(context_);
@@ -112,15 +113,15 @@ DebugHud::~DebugHud()
 
 void DebugHud::Update()
 {
-    Graphics* graphics = GetSubsystem<Graphics>();
-    Renderer* renderer = GetSubsystem<Renderer>();
+    auto* graphics = GetSubsystem<Graphics>();
+    auto* renderer = GetSubsystem<Renderer>();
     if (!renderer || !graphics)
         return;
 
     // Ensure UI-elements are not detached
     if (!statsText_->GetParent())
     {
-        UI* ui = GetSubsystem<UI>();
+        auto* ui = GetSubsystem<UI>();
         UIElement* uiRoot = ui->GetRoot();
         uiRoot->AddChild(statsText_);
         uiRoot->AddChild(modeText_);
@@ -165,7 +166,7 @@ void DebugHud::Update()
         String mode;
         mode.AppendWithFormat("Tex:%s Mat:%s Spec:%s Shadows:%s Size:%i Quality:%s Occlusion:%s Instancing:%s API:%s",
             qualityTexts[renderer->GetTextureQuality()],
-            qualityTexts[renderer->GetMaterialQuality()],
+            qualityTexts[Min((unsigned)renderer->GetMaterialQuality(), 3)],
             renderer->GetSpecularLighting() ? "On" : "Off",
             renderer->GetDrawShadows() ? "On" : "Off",
             renderer->GetShadowMapSize(),
@@ -177,8 +178,8 @@ void DebugHud::Update()
         modeText_->SetText(mode);
     }
 
-    Profiler* profiler = GetSubsystem<Profiler>();
-    EventProfiler* eventProfiler = GetSubsystem<EventProfiler>();
+    auto* profiler = GetSubsystem<Profiler>();
+    auto* eventProfiler = GetSubsystem<EventProfiler>();
     if (profiler)
     {
         if (profilerTimer_.GetMSec(false) >= profilerInterval_)
@@ -233,7 +234,7 @@ void DebugHud::SetMode(unsigned mode)
 
 #ifdef URHO3D_PROFILING
     // Event profiler is created on engine initialization if "EventProfiler" parameter is set
-    EventProfiler* eventProfiler = GetSubsystem<EventProfiler>();
+    auto* eventProfiler = GetSubsystem<EventProfiler>();
     if (eventProfiler)
         EventProfiler::SetActive((mode & DEBUGHUD_SHOW_EVENTPROFILER) != 0);
 #endif

@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2016 the Urho3D project.
+// Copyright (c) 2008-2020 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,8 +43,11 @@ Deserializer::Deserializer(unsigned size) :
 {
 }
 
-Deserializer::~Deserializer()
+Deserializer::~Deserializer() = default;
+
+unsigned Deserializer::SeekRelative(int delta)
 {
+    return Seek(GetPosition() + delta);
 }
 
 const String& Deserializer::GetName() const
@@ -144,6 +147,13 @@ IntVector2 Deserializer::ReadIntVector2()
     int data[2];
     Read(data, sizeof data);
     return IntVector2(data);
+}
+
+IntVector3 Deserializer::ReadIntVector3()
+{
+    int data[3];
+    Read(data, sizeof data);
+    return IntVector3(data);
 }
 
 Rect Deserializer::ReadRect()
@@ -291,7 +301,7 @@ ResourceRefList Deserializer::ReadResourceRefList()
 
 Variant Deserializer::ReadVariant()
 {
-    VariantType type = (VariantType)ReadUByte();
+    auto type = (VariantType)ReadUByte();
     return ReadVariant(type);
 }
 
@@ -301,6 +311,9 @@ Variant Deserializer::ReadVariant(VariantType type)
     {
     case VAR_INT:
         return Variant(ReadInt());
+
+    case VAR_INT64:
+        return Variant(ReadInt64());
 
     case VAR_BOOL:
         return Variant(ReadBool());
@@ -333,7 +346,7 @@ Variant Deserializer::ReadVariant(VariantType type)
     case VAR_VOIDPTR:
     case VAR_PTR:
         ReadUInt();
-        return Variant((void*)0);
+        return Variant((void*)nullptr);
 
     case VAR_RESOURCEREF:
         return Variant(ReadResourceRef());
@@ -356,6 +369,9 @@ Variant Deserializer::ReadVariant(VariantType type)
     case VAR_INTVECTOR2:
         return Variant(ReadIntVector2());
 
+    case VAR_INTVECTOR3:
+        return Variant(ReadIntVector3());
+
     case VAR_MATRIX3:
         return Variant(ReadMatrix3());
 
@@ -368,8 +384,14 @@ Variant Deserializer::ReadVariant(VariantType type)
     case VAR_DOUBLE:
         return Variant(ReadDouble());
 
+        // Deserializing custom values is not supported. Return empty
+    case VAR_CUSTOM_HEAP:
+    case VAR_CUSTOM_STACK:
+        ReadUInt();
+        return Variant::EMPTY;
+
     default:
-        return Variant();
+        return Variant::EMPTY;
     }
 }
 
@@ -409,22 +431,22 @@ unsigned Deserializer::ReadVLE()
     unsigned char byte;
 
     byte = ReadUByte();
-    ret = (unsigned)(byte & 0x7f);
+    ret = (unsigned)(byte & 0x7fu);
     if (byte < 0x80)
         return ret;
 
     byte = ReadUByte();
-    ret |= ((unsigned)(byte & 0x7f)) << 7;
+    ret |= ((unsigned)(byte & 0x7fu)) << 7u;
     if (byte < 0x80)
         return ret;
 
     byte = ReadUByte();
-    ret |= ((unsigned)(byte & 0x7f)) << 14;
+    ret |= ((unsigned)(byte & 0x7fu)) << 14u;
     if (byte < 0x80)
         return ret;
 
     byte = ReadUByte();
-    ret |= ((unsigned)byte) << 21;
+    ret |= ((unsigned)byte) << 21u;
     return ret;
 }
 

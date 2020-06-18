@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2016 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2019 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -69,14 +69,6 @@
     SDL_SendKeyboardText(str);
 }
 
-- (void)insertText:(id)insertString
-{
-    /* This method is part of NSTextInput and not NSTextInputClient, but
-     * apparently it still might be called in OS X 10.5 and can cause beeps if
-     * the implementation is missing: http://crbug.com/47890 */
-    [self insertText:insertString replacementRange:NSMakeRange(0, 0)];
-}
-
 - (void)doCommandBySelector:(SEL)myselector
 {
     /* No need to do anything since we are not using Cocoa
@@ -100,9 +92,9 @@
     return _selectedRange;
 }
 
-- (void)setMarkedText:(id)aString selectedRange:(NSRange)selectedRange replacementRange:(NSRange)replacementRange;
+- (void)setMarkedText:(id)aString selectedRange:(NSRange)selectedRange replacementRange:(NSRange)replacementRange
 {
-    if ([aString isKindOfClass: [NSAttributedString class]]) {
+    if ([aString isKindOfClass:[NSAttributedString class]]) {
         aString = [aString string];
     }
 
@@ -120,7 +112,7 @@
     _markedRange = NSMakeRange(0, [aString length]);
 
     SDL_SendEditingText([aString UTF8String],
-                        selectedRange.location, selectedRange.length);
+                        (int) selectedRange.location, (int) selectedRange.length);
 
     DEBUG_IME(@"setMarkedText: %@, (%d, %d)", _markedText,
           selRange.location, selRange.length);
@@ -134,7 +126,7 @@
     SDL_SendEditingText("", 0, 0);
 }
 
-- (NSRect)firstRectForCharacterRange:(NSRange)aRange actualRange:(NSRangePointer)actualRange;
+- (NSRect)firstRectForCharacterRange:(NSRange)aRange actualRange:(NSRangePointer)actualRange
 {
     NSWindow *window = [self window];
     NSRect contentRect = [window contentRectForFrameRect:[window frame]];
@@ -150,16 +142,19 @@
             aRange.location, aRange.length, windowHeight,
             NSStringFromRect(rect));
 
-    if ([[self window] respondsToSelector:@selector(convertRectToScreen:)]) {
-        rect = [[self window] convertRectToScreen:rect];
-    } else {
-        rect.origin = [[self window] convertBaseToScreen:rect.origin];
+#if MAC_OS_X_VERSION_MIN_REQUIRED < 1070
+    if (![window respondsToSelector:@selector(convertRectToScreen:)]) {
+        rect.origin = [window convertBaseToScreen:rect.origin];
+    } else
+#endif
+    {
+        rect = [window convertRectToScreen:rect];
     }
 
     return rect;
 }
 
-- (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)aRange actualRange:(NSRangePointer)actualRange;
+- (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)aRange actualRange:(NSRangePointer)actualRange
 {
     DEBUG_IME(@"attributedSubstringFromRange: (%d, %d)", aRange.location, aRange.length);
     return nil;
@@ -190,6 +185,7 @@
 }
 
 @end
+
 
 /* This is a helper function for HandleModifierSide. This
  * function reverts back to behavior before the distinction between
@@ -328,24 +324,6 @@ ReleaseModifierSide(unsigned int device_independent_mask,
     }
 }
 
-/* This is a helper function for DoSidedModifiers.
- * This function handles the CapsLock case.
- */
-static void
-HandleCapsLock(unsigned short scancode,
-               unsigned int oldMods, unsigned int newMods)
-{
-    unsigned int oldMask, newMask;
-
-    oldMask = oldMods & NSAlphaShiftKeyMask;
-    newMask = newMods & NSAlphaShiftKeyMask;
-
-    if (oldMask != newMask) {
-        SDL_SendKeyboardKey(SDL_PRESSED, SDL_SCANCODE_CAPSLOCK);
-        SDL_SendKeyboardKey(SDL_RELEASED, SDL_SCANCODE_CAPSLOCK);
-    }
-}
-
 /* This function will handle the modifier keys and also determine the
  * correct side of the key.
  */
@@ -374,11 +352,8 @@ DoSidedModifiers(unsigned short scancode,
 
     unsigned int i, bit;
 
-    /* Handle CAPSLOCK separately because it doesn't have a left/right side */
-    HandleCapsLock(scancode, oldMods, newMods);
-
     /* Iterate through the bits, testing each against the old modifiers */
-    for (i = 0, bit = NSShiftKeyMask; bit <= NSCommandKeyMask; bit <<= 1, ++i) {
+    for (i = 0, bit = NSEventModifierFlagShift; bit <= NSEventModifierFlagCommand; bit <<= 1, ++i) {
         unsigned int oldMask, newMask;
 
         oldMask = oldMods & bit;
@@ -498,11 +473,8 @@ Cocoa_InitKeyboard(_THIS)
     SDL_SetScancodeName(SDL_SCANCODE_RALT, "Right Option");
     SDL_SetScancodeName(SDL_SCANCODE_RGUI, "Right Command");
 
-    /* On pre-10.6, you might have the initial capslock key state wrong. */
-    if (floor(NSAppKitVersionNumber) >= NSAppKitVersionNumber10_6) {
-        data->modifierFlags = [NSEvent modifierFlags];
-        SDL_ToggleModState(KMOD_CAPS, (data->modifierFlags & NSAlphaShiftKeyMask) != 0);
-    }
+    data->modifierFlags = [NSEvent modifierFlags];
+    SDL_ToggleModState(KMOD_CAPS, (data->modifierFlags & NSEventModifierFlagCapsLock) != 0);
 }
 
 void
@@ -565,7 +537,7 @@ Cocoa_SetTextInputRect(_THIS, SDL_Rect *rect)
 void
 Cocoa_HandleKeyEvent(_THIS, NSEvent *event)
 {
-    SDL_VideoData *data = (SDL_VideoData *) _this->driverdata;
+    SDL_VideoData *data = _this ? ((SDL_VideoData *) _this->driverdata) : NULL;
     if (!data) {
         return;  /* can happen when returning from fullscreen Space on shutdown */
     }
@@ -589,7 +561,7 @@ Cocoa_HandleKeyEvent(_THIS, NSEvent *event)
     }
 
     switch ([event type]) {
-    case NSKeyDown:
+    case NSEventTypeKeyDown:
         if (![event isARepeat]) {
             /* See if we need to rebuild the keyboard layout */
             UpdateKeymap(data, SDL_TRUE);
@@ -598,7 +570,7 @@ Cocoa_HandleKeyEvent(_THIS, NSEvent *event)
         SDL_SendKeyboardKey(SDL_PRESSED, code);
 #if 1
         if (code == SDL_SCANCODE_UNKNOWN) {
-            fprintf(stderr, "The key you just pressed is not recognized by SDL. To help get this fixed, report this to the SDL mailing list <sdl@libsdl.org> or to Christian Walther <cwalther@gmx.ch>. Mac virtual key code is %d.\n", scancode);
+            fprintf(stderr, "The key you just pressed is not recognized by SDL. To help get this fixed, report this to the SDL forums/mailing list <https://discourse.libsdl.org/> or to Christian Walther <cwalther@gmx.ch>. Mac virtual key code is %d.\n", scancode);
         }
 #endif
         if (SDL_EventState(SDL_TEXTINPUT, SDL_QUERY)) {
@@ -613,10 +585,10 @@ Cocoa_HandleKeyEvent(_THIS, NSEvent *event)
 #endif
         }
         break;
-    case NSKeyUp:
+    case NSEventTypeKeyUp:
         SDL_SendKeyboardKey(SDL_RELEASED, code);
         break;
-    case NSFlagsChanged:
+    case NSEventTypeFlagsChanged:
         /* FIXME CW 2007-08-14: check if this whole mess that takes up half of this file is really necessary */
         HandleModifiers(_this, scancode, [event modifierFlags]);
         break;

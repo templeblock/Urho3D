@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2016 the Urho3D project.
+// Copyright (c) 2008-2020 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -45,12 +45,15 @@ namespace Urho3D
 
 void TextureCube::OnDeviceLost()
 {
+    if (object_.name_ && !graphics_->IsDeviceLost())
+        glDeleteTextures(1, &object_.name_);
+
     GPUObject::OnDeviceLost();
 
-    for (unsigned i = 0; i < MAX_CUBEMAP_FACES; ++i)
+    for (auto& renderSurface : renderSurfaces_)
     {
-        if (renderSurfaces_[i])
-            renderSurfaces_[i]->OnDeviceLost();
+        if (renderSurface)
+            renderSurface->OnDeviceLost();
     }
 }
 
@@ -59,7 +62,7 @@ void TextureCube::OnDeviceReset()
     if (!object_.name_ || dataPending_)
     {
         // If has a resource file, reload through the resource cache. Otherwise just recreate.
-        ResourceCache* cache = GetSubsystem<ResourceCache>();
+        auto* cache = GetSubsystem<ResourceCache>();
         if (cache->Exists(GetName()))
             dataLost_ = !cache->ReloadResource(this);
 
@@ -85,20 +88,23 @@ void TextureCube::Release()
             for (unsigned i = 0; i < MAX_TEXTURE_UNITS; ++i)
             {
                 if (graphics_->GetTexture(i) == this)
-                    graphics_->SetTexture(i, 0);
+                    graphics_->SetTexture(i, nullptr);
             }
 
             glDeleteTextures(1, &object_.name_);
         }
 
-        for (unsigned i = 0; i < MAX_CUBEMAP_FACES; ++i)
+        for (auto& renderSurface : renderSurfaces_)
         {
-            if (renderSurfaces_[i])
-                renderSurfaces_[i]->Release();
+            if (renderSurface)
+                renderSurface->Release();
         }
 
         object_.name_ = 0;
     }
+
+    resolveDirty_ = false;
+    levelsDirty_ = false;
 }
 
 bool TextureCube::SetData(CubeMapFace face, unsigned level, int x, int y, int width, int height, const void* data)
@@ -132,8 +138,8 @@ bool TextureCube::SetData(CubeMapFace face, unsigned level, int x, int y, int wi
 
     if (IsCompressed())
     {
-        x &= ~3;
-        y &= ~3;
+        x &= ~3u;
+        y &= ~3u;
     }
 
     int levelWidth = GetLevelWidth(level);
@@ -168,7 +174,7 @@ bool TextureCube::SetData(CubeMapFace face, unsigned level, int x, int y, int wi
                 GetDataSize(width, height), data);
     }
 
-    graphics_->SetTexture(0, 0);
+    graphics_->SetTexture(0, nullptr);
     return true;
 }
 
@@ -192,8 +198,8 @@ bool TextureCube::SetData(CubeMapFace face, Image* image, bool useAlpha)
     // Use a shared ptr for managing the temporary mip images created during this function
     SharedPtr<Image> mipImage;
     unsigned memoryUse = 0;
-    int quality = QUALITY_HIGH;
-    Renderer* renderer = GetSubsystem<Renderer>();
+    MaterialQuality quality = QUALITY_HIGH;
+    auto* renderer = GetSubsystem<Renderer>();
     if (renderer)
         quality = renderer->GetTextureQuality();
 
@@ -311,10 +317,10 @@ bool TextureCube::SetData(CubeMapFace face, Image* image, bool useAlpha)
         unsigned mipsToSkip = mipsToSkip_[quality];
         if (mipsToSkip >= levels)
             mipsToSkip = levels - 1;
-        while (mipsToSkip && (width / (1 << mipsToSkip) < 4 || height / (1 << mipsToSkip) < 4))
+        while (mipsToSkip && (width / (1u << mipsToSkip) < 4 || height / (1u << mipsToSkip) < 4))
             --mipsToSkip;
-        width /= (1 << mipsToSkip);
-        height /= (1 << mipsToSkip);
+        width /= (1u << mipsToSkip);
+        height /= (1u << mipsToSkip);
 
         // Create the texture when face 0 is being loaded, assume rest of the faces are same size & format
         if (!face)
@@ -346,7 +352,7 @@ bool TextureCube::SetData(CubeMapFace face, Image* image, bool useAlpha)
             }
             else
             {
-                unsigned char* rgbaData = new unsigned char[level.width_ * level.height_ * 4];
+                auto* rgbaData = new unsigned char[level.width_ * level.height_ * 4];
                 level.Decompress(rgbaData);
                 SetData(face, i, 0, 0, level.width_, level.height_, rgbaData);
                 memoryUse += level.width_ * level.height_ * 4;
@@ -357,8 +363,8 @@ bool TextureCube::SetData(CubeMapFace face, Image* image, bool useAlpha)
 
     faceMemoryUse_[face] = memoryUse;
     unsigned totalMemoryUse = sizeof(TextureCube);
-    for (unsigned i = 0; i < MAX_CUBEMAP_FACES; ++i)
-        totalMemoryUse += faceMemoryUse_[i];
+    for (unsigned memoryUse : faceMemoryUse_)
+        totalMemoryUse += memoryUse;
     SetMemoryUse(totalMemoryUse);
     return true;
 }
@@ -390,6 +396,15 @@ bool TextureCube::GetData(CubeMapFace face, unsigned level, void* dest) const
         return false;
     }
 
+    if (multiSample_ > 1 && !autoResolve_)
+    {
+        URHO3D_LOGERROR("Can not get data from multisampled texture without autoresolve");
+        return false;
+    }
+
+    if (resolveDirty_)
+        graphics_->ResolveToTexture(const_cast<TextureCube*>(this));
+
     graphics_->SetTextureForUpdate(const_cast<TextureCube*>(this));
 
     if (!IsCompressed())
@@ -397,7 +412,7 @@ bool TextureCube::GetData(CubeMapFace face, unsigned level, void* dest) const
     else
         glGetCompressedTexImage((GLenum)(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face), level, dest);
 
-    graphics_->SetTexture(0, 0);
+    graphics_->SetTexture(0, nullptr);
     return true;
 #else
     // Special case on GLES: if the texture is a rendertarget, can make it current and use glReadPixels()
@@ -428,6 +443,15 @@ bool TextureCube::Create()
         return true;
     }
 
+#ifdef GL_ES_VERSION_2_0
+    if (multiSample_ > 1)
+    {
+        URHO3D_LOGWARNING("Multisampled texture is not supported on OpenGL ES");
+        multiSample_ = 1;
+        autoResolve_ = false;
+    }
+#endif
+
     glGenTextures(1, &object_.name_);
 
     // Ensure that our texture is bound to OpenGL texture unit 0
@@ -438,13 +462,20 @@ bool TextureCube::Create()
     unsigned externalFormat = GetExternalFormat(format_);
     unsigned dataType = GetDataType(format_);
 
+    // If multisample, create renderbuffers for each face
+    if (multiSample_ > 1)
+    {
+        for (auto& renderSurface : renderSurfaces_)
+            renderSurface->CreateRenderBuffer(width_, height_, format, multiSample_);
+    }
+
     bool success = true;
     if (!IsCompressed())
     {
         glGetError();
         for (unsigned i = 0; i < MAX_CUBEMAP_FACES; ++i)
         {
-            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, format, width_, height_, 0, externalFormat, dataType, 0);
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, format, width_, height_, 0, externalFormat, dataType, nullptr);
             if (glGetError())
                 success = false;
         }
@@ -453,6 +484,24 @@ bool TextureCube::Create()
         URHO3D_LOGERROR("Failed to create texture");
 
     // Set mipmapping
+    if (usage_ == TEXTURE_DEPTHSTENCIL || usage_ == TEXTURE_DYNAMIC)
+        requestedLevels_ = 1;
+    else if (usage_ == TEXTURE_RENDERTARGET)
+    {
+#if defined(__EMSCRIPTEN__) || defined(IOS) || defined(TVOS)
+        // glGenerateMipmap appears to not be working on WebGL or iOS/tvOS, disable rendertarget mipmaps for now
+        requestedLevels_ = 1;
+#else
+        if (requestedLevels_ != 1)
+        {
+            // Generate levels for the first time now
+            RegenerateLevels();
+            // Determine max. levels automatically
+            requestedLevels_ = 0;
+        }
+#endif
+    }
+
     levels_ = CheckMaxLevels(width_, height_, requestedLevels_);
 #ifndef GL_ES_VERSION_2_0
     glTexParameteri(target_, GL_TEXTURE_BASE_LEVEL, 0);
@@ -461,7 +510,7 @@ bool TextureCube::Create()
 
     // Set initial parameters, then unbind the texture
     UpdateParameters();
-    graphics_->SetTexture(0, 0);
+    graphics_->SetTexture(0, nullptr);
 
     return success;
 }

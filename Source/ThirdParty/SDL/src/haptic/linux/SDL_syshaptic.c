@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2016 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2019 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -49,7 +49,7 @@
 static int MaybeAddDevice(const char *path);
 #if SDL_USE_LIBUDEV
 static int MaybeRemoveDevice(const char *path);
-void haptic_udev_callback(SDL_UDEV_deviceevent udev_type, int udev_class, const char *devpath);
+static void haptic_udev_callback(SDL_UDEV_deviceevent udev_type, int udev_class, const char *devpath);
 #endif /* SDL_USE_LIBUDEV */
 
 /*
@@ -181,13 +181,16 @@ SDL_SYS_HapticInit(void)
         SDL_UDEV_Quit();
         return SDL_SetError("Could not setup haptic <-> udev callback");
     }
+
+    /* Force a scan to build the initial device list */
+    SDL_UDEV_Scan();
 #endif /* SDL_USE_LIBUDEV */
 
     return numhaptics;
 }
 
 int
-SDL_SYS_NumHaptics()
+SDL_SYS_NumHaptics(void)
 {
     return numhaptics;
 }
@@ -211,7 +214,7 @@ HapticByDevIndex(int device_index)
 }
 
 #if SDL_USE_LIBUDEV
-void haptic_udev_callback(SDL_UDEV_deviceevent udev_type, int udev_class, const char *devpath)
+static void haptic_udev_callback(SDL_UDEV_deviceevent udev_type, int udev_class, const char *devpath)
 {
     if (devpath == NULL || !(udev_class & SDL_UDEV_DEVICE_JOYSTICK)) {
         return;
@@ -609,7 +612,7 @@ SDL_SYS_HapticQuit(void)
         /* Opened and not closed haptics are leaked, this is on purpose.
          * Close your haptic devices after usage. */
         SDL_free(item->fname);
-        item->fname = NULL;
+        SDL_free(item);
     }
 
 #if SDL_USE_LIBUDEV
@@ -690,7 +693,7 @@ SDL_SYS_ToDirection(Uint16 *dest, SDL_HapticDirection * src)
         else if (!src->dir[0])
             *dest = (src->dir[1] >= 0 ? 0x8000 : 0);
         else {
-            float f = atan2(src->dir[1], src->dir[0]);    /* Ideally we'd use fixed point math instead of floats... */
+            float f = SDL_atan2(src->dir[1], src->dir[0]);    /* Ideally we'd use fixed point math instead of floats... */
                     /*
                       atan2 takes the parameters: Y-axis-value and X-axis-value (in that order)
                        - Y-axis-value is the second coordinate (from center to SOUTH)
@@ -905,9 +908,9 @@ SDL_SYS_ToFFEffect(struct ff_effect *dest, SDL_HapticEffect * src)
         dest->trigger.button = 0;
         dest->trigger.interval = 0;
 
-        /* Rumble */
-        dest->u.rumble.strong_magnitude = leftright->large_magnitude;
-        dest->u.rumble.weak_magnitude = leftright->small_magnitude;
+        /* Rumble (Linux expects 0-65535, so multiply by 2) */
+        dest->u.rumble.strong_magnitude = CLAMP(leftright->large_magnitude) * 2;
+        dest->u.rumble.weak_magnitude = CLAMP(leftright->small_magnitude) * 2;
 
         break;
 

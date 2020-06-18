@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2016 the Urho3D project.
+// Copyright (c) 2008-2020 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,11 @@
 // THE SOFTWARE.
 //
 
+/// \file
+
 #pragma once
 
+#include "../Container/FlagSet.h"
 #include "../Container/HashBase.h"
 #include "../Math/StringHash.h"
 
@@ -30,8 +33,8 @@ namespace Urho3D
 
 class Vector3;
 
-/// Graphics capability support level. Web platform (Emscripten) also uses OpenGL ES, but is considered a desktop platform capability-wise
-#if defined(IOS) || defined(__ANDROID__) || defined(__arm__) || defined(__aarch64__)
+// Graphics capability support level. Web platform (Emscripten) also uses OpenGL ES, but is considered a desktop platform capability-wise
+#if defined(IOS) || defined(TVOS) || defined(__ANDROID__) || defined(__arm__) || defined(__aarch64__)
 #define MOBILE_GRAPHICS
 #else
 #define DESKTOP_GRAPHICS
@@ -48,7 +51,7 @@ enum PrimitiveType
     TRIANGLE_FAN
 };
 
-/// %Geometry type.
+/// %Geometry type for vertex shader geometry variations.
 enum GeometryType
 {
     GEOM_STATIC = 0,
@@ -58,8 +61,9 @@ enum GeometryType
     GEOM_DIRBILLBOARD = 4,
     GEOM_TRAIL_FACE_CAMERA = 5,
     GEOM_TRAIL_BONE = 6,
-    GEOM_STATIC_NOINSTANCING = 7,
     MAX_GEOMETRYTYPES = 7,
+    // This is not a real geometry type for VS, but used to mark objects that do not desire to be instanced
+    GEOM_STATIC_NOINSTANCING = 7,
 };
 
 /// Blending mode.
@@ -179,7 +183,7 @@ enum VertexElementSemantic
 struct URHO3D_API VertexElement
 {
     /// Default-construct.
-    VertexElement() :
+    VertexElement() noexcept :
         type_(TYPE_VECTOR3),
         semantic_(SEM_POSITION),
         index_(0),
@@ -189,7 +193,7 @@ struct URHO3D_API VertexElement
     }
 
     /// Construct with type, semantic, index and whether is per-instance data.
-    VertexElement(VertexElementType type, VertexElementSemantic semantic, unsigned char index = 0, bool perInstance = false) :
+    VertexElement(VertexElementType type, VertexElementSemantic semantic, unsigned char index = 0, bool perInstance = false) noexcept :
         type_(type),
         semantic_(semantic),
         index_(index),
@@ -229,6 +233,7 @@ enum TextureFilterMode
     FILTER_BILINEAR,
     FILTER_TRILINEAR,
     FILTER_ANISOTROPIC,
+    FILTER_NEAREST_ANISOTROPIC,
     FILTER_DEFAULT,
     MAX_FILTERMODES
 };
@@ -352,10 +357,11 @@ enum FaceCameraMode
     FC_ROTATE_Y,
     FC_LOOKAT_XYZ,
     FC_LOOKAT_Y,
-    FC_DIRECTION
+    FC_LOOKAT_MIXED,
+    FC_DIRECTION,
 };
 
-/// Shadow type
+/// Shadow type.
 enum ShadowQuality
 {
     SHADOWQUALITY_SIMPLE_16BIT = 0,
@@ -419,35 +425,50 @@ extern URHO3D_API const StringHash PSP_LIGHTMATRICES;
 extern URHO3D_API const StringHash PSP_VSMSHADOWPARAMS;
 extern URHO3D_API const StringHash PSP_ROUGHNESS;
 extern URHO3D_API const StringHash PSP_METALLIC;
+extern URHO3D_API const StringHash PSP_LIGHTRAD;
+extern URHO3D_API const StringHash PSP_LIGHTLENGTH;
+extern URHO3D_API const StringHash PSP_ZONEMIN;
+extern URHO3D_API const StringHash PSP_ZONEMAX;
 
 // Scale calculation from bounding box diagonal.
 extern URHO3D_API const Vector3 DOT_SCALE;
 
-static const int QUALITY_LOW = 0;
-static const int QUALITY_MEDIUM = 1;
-static const int QUALITY_HIGH = 2;
-static const int QUALITY_MAX = 15;
+enum MaterialQuality : unsigned
+{
+    QUALITY_LOW = 0,
+    QUALITY_MEDIUM = 1,
+    QUALITY_HIGH = 2,
+    QUALITY_MAX = 15,
+};
 
-static const unsigned CLEAR_COLOR = 0x1;
-static const unsigned CLEAR_DEPTH = 0x2;
-static const unsigned CLEAR_STENCIL = 0x4;
+enum ClearTarget : unsigned
+{
+    CLEAR_COLOR = 0x1,
+    CLEAR_DEPTH = 0x2,
+    CLEAR_STENCIL = 0x4,
+};
+URHO3D_FLAGSET(ClearTarget, ClearTargetFlags);
 
 // Legacy vertex element bitmasks.
-static const unsigned MASK_NONE = 0x0;
-static const unsigned MASK_POSITION = 0x1;
-static const unsigned MASK_NORMAL = 0x2;
-static const unsigned MASK_COLOR = 0x4;
-static const unsigned MASK_TEXCOORD1 = 0x8;
-static const unsigned MASK_TEXCOORD2 = 0x10;
-static const unsigned MASK_CUBETEXCOORD1 = 0x20;
-static const unsigned MASK_CUBETEXCOORD2 = 0x40;
-static const unsigned MASK_TANGENT = 0x80;
-static const unsigned MASK_BLENDWEIGHTS = 0x100;
-static const unsigned MASK_BLENDINDICES = 0x200;
-static const unsigned MASK_INSTANCEMATRIX1 = 0x400;
-static const unsigned MASK_INSTANCEMATRIX2 = 0x800;
-static const unsigned MASK_INSTANCEMATRIX3 = 0x1000;
-static const unsigned MASK_OBJECTINDEX = 0x2000;
+enum VertexMask : unsigned
+{
+    MASK_NONE = 0x0,
+    MASK_POSITION = 0x1,
+    MASK_NORMAL = 0x2,
+    MASK_COLOR = 0x4,
+    MASK_TEXCOORD1 = 0x8,
+    MASK_TEXCOORD2 = 0x10,
+    MASK_CUBETEXCOORD1 = 0x20,
+    MASK_CUBETEXCOORD2 = 0x40,
+    MASK_TANGENT = 0x80,
+    MASK_BLENDWEIGHTS = 0x100,
+    MASK_BLENDINDICES = 0x200,
+    MASK_INSTANCEMATRIX1 = 0x400,
+    MASK_INSTANCEMATRIX2 = 0x800,
+    MASK_INSTANCEMATRIX3 = 0x1000,
+    MASK_OBJECTINDEX = 0x2000,
+};
+URHO3D_FLAGSET(VertexMask, VertexMaskFlags);
 
 static const int MAX_RENDERTARGETS = 4;
 static const int MAX_VERTEX_STREAMS = 4;

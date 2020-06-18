@@ -1,5 +1,5 @@
 --
--- Copyright (c) 2008-2016 the Urho3D project.
+-- Copyright (c) 2008-2020 the Urho3D project.
 --
 -- Permission is hereby granted, free of charge, to any person obtaining a copy
 -- of this software and associated documentation files (the "Software"), to deal
@@ -210,8 +210,10 @@ function getCurrentDirectory()
   local path = ""
   local tmpFile = os.tmpname()
   if separator == "\\" then
-    -- Workaround broken os.tmpname() on Windows platform
-    tmpFile = os.getenv('TMP') .. tmpFile
+    if not tmpFile:find(':') then
+      -- Workaround broken os.tmpname()
+      tmpFile = os.getenv('TMP') .. tmpFile
+    end
     os.execute("cd > " .. tmpFile)
   else
     os.execute("pwd > " .. tmpFile)
@@ -533,7 +535,7 @@ function writeFunction(file, func)
       local declaration = func.declarations[i]
       if declaration.type ~= "void" then
         line = line .. declaration.type .. declaration.ptr .. " " .. declaration.name
-        -- add paramter default value
+        -- add parameter default value
         if declaration.def ~= "" then
           line = line .. " = " .. declaration.def
         end

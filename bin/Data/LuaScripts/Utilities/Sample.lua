@@ -89,7 +89,7 @@ end
 
 function CreateLogo()
     -- Get logo texture
-    local logoTexture = cache:GetResource("Texture2D", "Textures/LogoLarge.png")
+    local logoTexture = cache:GetResource("Texture2D", "Textures/FishBoneLogo.png")
     if logoTexture == nil then
         return
     end
@@ -110,13 +110,13 @@ function CreateLogo()
     logoSprite:SetSize(textureWidth, textureHeight)
 
     -- Set logo sprite hot spot
-    logoSprite.hotSpot = IntVector2(0, textureHeight)
+    logoSprite.hotSpot = IntVector2(textureWidth, textureHeight)
 
     -- Set logo sprite alignment
-    logoSprite:SetAlignment(HA_LEFT, VA_BOTTOM);
+    logoSprite:SetAlignment(HA_RIGHT, VA_BOTTOM)
 
     -- Make logo not fully opaque to show the scene underneath
-    logoSprite.opacity = 0.75
+    logoSprite.opacity = 0.9
 
     -- Set a low priority for the logo so that other UI elements can be drawn on top
     logoSprite.priority = -100
@@ -153,12 +153,12 @@ function HandleKeyUp(eventType, eventData)
             console:SetVisible(false)
         else
             if GetPlatform() == "Web" then
-                input.mouseVisible = true;
+                input.mouseVisible = true
                 if (useMouseMode_ ~= MM_ABSOLUTE) then
-                    input.mouseMode = MM_FREE;
+                    input.mouseMode = MM_FREE
                 end
             else
-                engine:Exit();
+                engine:Exit()
             end
         end
     end
@@ -303,7 +303,7 @@ end
 -- If the user clicks the canvas, attempt to switch to relative mouse mode on web platform
 function HandleMouseModeChange(eventType, eventData)
     mouseLocked = eventData["MouseLocked"]:GetBool()
-    input.mouseVisible = not mouseLocked;
+    input.mouseVisible = not mouseLocked
 end
 
 -- Create empty XML patch instructions for screen joystick layout if none defined

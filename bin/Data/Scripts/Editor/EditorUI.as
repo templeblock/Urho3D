@@ -63,6 +63,8 @@ float uiMinOpacity = 0.3;
 float uiMaxOpacity = 0.7;
 bool uiHidden = false;
 
+TerrainEditor terrainEditor;
+
 void CreateUI()
 {
     // Remove all existing UI content in case we are reloading the editor script
@@ -96,6 +98,9 @@ void CreateUI()
     CreateCamera();
     CreateLayerEditor();
     CreateColorWheel();
+    CreateDuplicatorEditor();
+
+	terrainEditor.Create();
 
     SubscribeToEvent("ScreenMode", "ResizeUI");
     SubscribeToEvent("MenuSelected", "HandleMenuSelected");
@@ -424,7 +429,11 @@ void CreateMenuBar()
         //else if (hotKeyMode == HOT_KEYS_MODE_BLENDER)
         //    popup.AddChild(CreateMenuItem("Toggle update", @ToggleSceneUpdate, KEY_P, QUAL_CTRL));
 
-        if (hotKeyMode == HOTKEYS_MODE_BLENDER)
+        if (hotKeyMode == HOTKEYS_MODE_STANDARD)
+        {
+            popup.AddChild(CreateMenuItem("View closer", @ViewCloser, KEY_F));
+        }
+        else if (hotKeyMode == HOTKEYS_MODE_BLENDER)
         {
              popup.AddChild(CreateMenuItem("Move to layer", @ShowLayerMover, KEY_M));
              popup.AddChild(CreateMenuItem("Smart Duplicate", @SceneSmartDuplicateNode, KEY_D, QUAL_ALT));
@@ -525,7 +534,9 @@ void CreateMenuBar()
         popup.AddChild(CreateMenuItem("Resource browser", @ToggleResourceBrowserWindow, KEY_B, QUAL_CTRL));
         popup.AddChild(CreateMenuItem("Material editor", @ToggleMaterialEditor));
         popup.AddChild(CreateMenuItem("Particle editor", @ToggleParticleEffectEditor));
+        popup.AddChild(CreateMenuItem("Terrain editor", TerrainEditorShowCallback(terrainEditor.Show)));
         popup.AddChild(CreateMenuItem("Spawn editor", @ToggleSpawnEditor));
+        popup.AddChild(CreateMenuItem("Duplicator editor", @ToggleDuplicatorEditor));
         popup.AddChild(CreateMenuItem("Sound Type editor", @ToggleSoundTypeEditor));
         popup.AddChild(CreateMenuItem("Editor settings", @ToggleEditorSettingsDialog));
         popup.AddChild(CreateMenuItem("Editor preferences", @ToggleEditorPreferencesDialog));
@@ -538,11 +549,6 @@ void CreateMenuBar()
     BorderImage@ spacer = BorderImage("MenuBarSpacer");
     uiMenuBar.AddChild(spacer);
     spacer.style = "EditorMenuBar";
-
-    BorderImage@ logo = BorderImage("Logo");
-    logo.texture = cache.GetResource("Texture2D", "Textures/Logo.png");
-    logo.SetFixedWidth(64);
-    uiMenuBar.AddChild(logo);
 }
 
 bool Exit()
@@ -1014,6 +1020,8 @@ Text@ CreateAccelKeyText(int accelKey, int accelQual)
         text = "F12";
     else if (accelKey == SHOW_POPUP_INDICATOR)
         text = ">";
+    else if (accelKey == KEY_KP_PERIOD)
+        text = "NumPad .";
     else
         text.AppendUTF8(accelKey);
     if (accelQual & QUAL_ALT > 0)
@@ -1114,7 +1122,7 @@ void CreateDebugHud()
 void CenterDialog(UIElement@ element)
 {
     IntVector2 size = element.size;
-    element.SetPosition((graphics.width - size.x) / 2, (graphics.height - size.y) / 2);
+    element.SetPosition((ui.root.width - size.x) / 2, (ui.root.height - size.y) / 2);
 }
 
 void CreateContextMenu()
@@ -1176,6 +1184,7 @@ void HandleOpenSceneFile(StringHash eventType, VariantMap& eventData)
 {
     CloseFileSelector(uiSceneFilter, uiScenePath);
     LoadScene(ExtractFileName(eventData));
+    SendEvent(EDITOR_EVENT_SCENE_LOADED);
 }
 
 void HandleSaveSceneFile(StringHash eventType, VariantMap& eventData)
@@ -1247,7 +1256,13 @@ void ExecuteScript(const String&in fileName)
 void HandleRunScript(StringHash eventType, VariantMap& eventData)
 {
     CloseFileSelector(uiScriptFilter, uiScriptPath);
+
+    suppressSceneChanges = true;
     ExecuteScript(ExtractFileName(eventData));
+    suppressSceneChanges = false;
+
+    UpdateHierarchyItem(editorScene, true);
+    UpdateHierarchyItem(editorUIElement, true);
 }
 
 void HandleResourcePath(StringHash eventType, VariantMap& eventData)
@@ -1328,6 +1343,8 @@ void HandleHotKeysBlender( VariantMap& eventData)
         TogglePhysicsDebug();
     else if (key == KEY_F4)
         ToggleOctreeDebug();
+    else if (key == KEY_F5)
+        ToggleNavigationDebug();
     else if (key == KEY_F11)
     {
         Image@ screenshot = Image();
@@ -1337,44 +1354,51 @@ void HandleHotKeysBlender( VariantMap& eventData)
         screenshot.SavePNG(screenshotDir + "/Screenshot_" +
                 time.timeStamp.Replaced(':', '_').Replaced('.', '_').Replaced(' ', '_') + ".png");
     }
+    // In Blender, HOME key is for locating the selected objects by pan and
+    // the PERIOD key of keypad is for moving the camera to focus the selected.
+    // Here we ignore the difference.
+    else if ((key == KEY_HOME || key == KEY_KP_PERIOD) && ui.focusElement is null)
+    {
+        if (selectedNodes.length > 0 || selectedComponents.length > 0)
+        {
+            LocateNodesAndComponents(selectedNodes, selectedComponents);
+        }
+    }
     else if (key == KEY_KP_1 && ui.focusElement is null) // Front view
     {
-        Vector3 center = Vector3(0,0,0);
-        if (selectedNodes.length > 0 || selectedComponents.length > 0)
-            center = SelectedNodesCenterPoint();
+        cameraSmoothInterpolate.Finish();
 
-        Vector3 pos = cameraNode.worldPosition - center;
-        cameraNode.worldPosition = center - Vector3(0.0, 0.0, pos.length * viewDirection);
-        cameraNode.direction = Vector3(0, 0, viewDirection);
-        ReacquireCameraYawPitch();
+        Vector3 pos = -Vector3(0.0, 0.0, cameraNode.position.length * viewDirection);
+        Quaternion rot = Quaternion(Vector3::FORWARD, Vector3(0, 0, viewDirection));
+
+        cameraSmoothInterpolate.SetCameraNodePosition(cameraNode.position, pos);
+        cameraSmoothInterpolate.SetCameraNodeRotation(cameraNode.rotation, rot);
+        cameraSmoothInterpolate.Start(0.5f);
     }
-
-    else if (key == KEY_KP_3 && ui.focusElement is null) // Side view
+    else if ((key == KEY_KP_3 || key == KEY_KP_9) && ui.focusElement is null) // Side view
     {
-        Vector3 center = Vector3(0,0,0);
-        if (selectedNodes.length > 0 || selectedComponents.length > 0)
-            center = SelectedNodesCenterPoint();
+        cameraSmoothInterpolate.Finish();
 
-        Vector3 pos = cameraNode.worldPosition - center;
-        cameraNode.worldPosition = center - Vector3(pos.length * -viewDirection, 0.0, 0.0);
-        cameraNode.direction = Vector3(-viewDirection, 0, 0);
-        ReacquireCameraYawPitch();
+        Vector3 pos = -Vector3(cameraNode.position.length * -viewDirection, 0.0, 0.0);
+        Quaternion rot = Quaternion(Vector3::FORWARD, Vector3(-viewDirection, 0, 0));
+
+        cameraSmoothInterpolate.SetCameraNodePosition(cameraNode.position, pos);
+        cameraSmoothInterpolate.SetCameraNodeRotation(cameraNode.rotation, rot);
+        cameraSmoothInterpolate.Start(0.5f);
     }
-
     else if (key == KEY_KP_7 && ui.focusElement is null) // Top view
     {
-        Vector3 center = Vector3(0,0,0);
-        if (selectedNodes.length > 0 || selectedComponents.length > 0)
-            center = SelectedNodesCenterPoint();
+        cameraSmoothInterpolate.Finish();
 
-        Vector3 pos = cameraNode.worldPosition - center;
-        cameraNode.worldPosition = center - Vector3(0.0, pos.length * -viewDirection, 0.0);
-        cameraNode.direction = Vector3(0, -viewDirection, 0);
-        ReacquireCameraYawPitch();
+        Vector3 pos = -Vector3(0.0, cameraNode.position.length * -viewDirection, 0.0);
+        Quaternion rot = Quaternion(Vector3::FORWARD, Vector3(0, -viewDirection, 0));
+
+        cameraSmoothInterpolate.SetCameraNodePosition(cameraNode.position, pos);
+        cameraSmoothInterpolate.SetCameraNodeRotation(cameraNode.rotation, rot);
+        cameraSmoothInterpolate.Start(0.5f);
     }
     else if (key == KEY_KP_5 && ui.focusElement is null)
     {
-        activeViewport.camera.zoom = 1;
         activeViewport.ToggleOrthographic();
     }
     else if (key == '4' && ui.focusElement is null)
@@ -1425,53 +1449,26 @@ void HandleHotKeysBlender( VariantMap& eventData)
                 SceneResetRotation();
             else if (key == KEY_S)
                 SceneResetScale();
-            else if (key == KEY_F)
-            {
-                 Vector3 center = Vector3(0,0,0);
-
-                 if (selectedNodes.length > 0)
-                    center = SelectedNodesCenterPoint();
-
-                 cameraNode.LookAt(center);
-                 ReacquireCameraYawPitch();
-            }
          }
          else if (eventData["Qualifiers"].GetInt() != QUAL_CTRL) // set transformations
          {
-                if (key == KEY_G)
-                {
-                    editMode = EDIT_MOVE;
-                    axisMode = AxisMode(axisMode ^ AXIS_LOCAL);
+            if (key == KEY_G)
+            {
+                editMode = EDIT_MOVE;
+                axisMode = AxisMode(axisMode ^ AXIS_LOCAL);
 
-                }
-                else if (key == KEY_R)
-                {
-                    editMode = EDIT_ROTATE;
-                    axisMode = AxisMode(axisMode ^ AXIS_LOCAL);
+            }
+            else if (key == KEY_R)
+            {
+                editMode = EDIT_ROTATE;
+                axisMode = AxisMode(axisMode ^ AXIS_LOCAL);
 
-                }
-                else if (key == KEY_S)
-                {
-                    editMode = EDIT_SCALE;
-                    axisMode = AxisMode(axisMode ^ AXIS_LOCAL);
-                }
-                else if (key == KEY_F)
-                {
-                    if (camera.orthographic)
-                    {
-                        viewCloser = true;
-                    }
-                    else
-                    {
-                        Vector3 center = Vector3(0,0,0);
-
-                        if (selectedNodes.length > 0)
-                            center = SelectedNodesCenterPoint();
-
-                        cameraNode.LookAt(center);
-                        ReacquireCameraYawPitch();
-                    }
-                }
+            }
+            else if (key == KEY_S)
+            {
+                editMode = EDIT_SCALE;
+                axisMode = AxisMode(axisMode ^ AXIS_LOCAL);
+            }
          }
     }
 
@@ -1519,6 +1516,8 @@ void HandleHotKeysStandard(VariantMap& eventData)
         TogglePhysicsDebug();
     else if (key == KEY_F4)
         ToggleOctreeDebug();
+    else if (key == KEY_F5)
+        ToggleNavigationDebug();
     else if (key == KEY_F11)
     {
         Image@ screenshot = Image();
@@ -1528,42 +1527,46 @@ void HandleHotKeysStandard(VariantMap& eventData)
         screenshot.SavePNG(screenshotDir + "/Screenshot_" +
                 time.timeStamp.Replaced(':', '_').Replaced('.', '_').Replaced(' ', '_') + ".png");
     }
+    else if ((key == KEY_HOME || key == KEY_F) && ui.focusElement is null)
+    {
+        if (selectedNodes.length > 0 || selectedComponents.length > 0)
+        {
+            LocateNodesAndComponents(selectedNodes, selectedComponents);
+        }
+    }
     else if (key == KEY_KP_1 && ui.focusElement is null) // Front view
     {
-        Vector3 center = Vector3(0,0,0);
-        if (selectedNodes.length > 0 || selectedComponents.length > 0)
-            center = SelectedNodesCenterPoint();
+        cameraSmoothInterpolate.Finish();
 
-        Vector3 pos = cameraNode.worldPosition - center;
-        cameraNode.worldPosition = center - Vector3(0.0, 0.0, pos.length * viewDirection);
-        cameraNode.direction = Vector3(0, 0, viewDirection);
-        ReacquireCameraYawPitch();
+        Vector3 pos = -Vector3(0.0, 0.0, cameraNode.position.length * viewDirection);
+        Quaternion rot = Quaternion(Vector3::FORWARD, Vector3(0, 0, viewDirection));
+
+        cameraSmoothInterpolate.SetCameraNodePosition(cameraNode.position, pos);
+        cameraSmoothInterpolate.SetCameraNodeRotation(cameraNode.rotation, rot);
+        cameraSmoothInterpolate.Start(0.5f);
     }
-
-    else if (key == KEY_KP_3 && ui.focusElement is null) // Side view
+    else if ((key == KEY_KP_3 || key == KEY_KP_9) && ui.focusElement is null) // Side view
     {
-        Vector3 center = Vector3(0,0,0);
-        if (selectedNodes.length > 0 || selectedComponents.length > 0)
-            center = SelectedNodesCenterPoint();
+        cameraSmoothInterpolate.Finish();
 
-        Vector3 pos = cameraNode.worldPosition - center;
-        cameraNode.worldPosition = center - Vector3(pos.length * -viewDirection, 0.0, 0.0);
-        cameraNode.direction = Vector3(-viewDirection, 0, 0);
-        ReacquireCameraYawPitch();
+        Vector3 pos = -Vector3(cameraNode.position.length * -viewDirection, 0.0, 0.0);
+        Quaternion rot = Quaternion(Vector3::FORWARD, Vector3(-viewDirection, 0, 0));
+
+        cameraSmoothInterpolate.SetCameraNodePosition(cameraNode.position, pos);
+        cameraSmoothInterpolate.SetCameraNodeRotation(cameraNode.rotation, rot);
+        cameraSmoothInterpolate.Start(0.5f);
     }
-
     else if (key == KEY_KP_7 && ui.focusElement is null) // Top view
     {
-        Vector3 center = Vector3(0,0,0);
-        if (selectedNodes.length > 0 || selectedComponents.length > 0)
-            center = SelectedNodesCenterPoint();
+        cameraSmoothInterpolate.Finish();
 
-        Vector3 pos = cameraNode.worldPosition - center;
-        cameraNode.worldPosition = center - Vector3(0.0, pos.length * -viewDirection, 0.0);
-        cameraNode.direction = Vector3(0, -viewDirection, 0);
-        ReacquireCameraYawPitch();
+        Vector3 pos = -Vector3(0.0, cameraNode.position.length * -viewDirection, 0.0);
+        Quaternion rot = Quaternion(Vector3::FORWARD, Vector3(0, -viewDirection, 0));
+
+        cameraSmoothInterpolate.SetCameraNodePosition(cameraNode.position, pos);
+        cameraSmoothInterpolate.SetCameraNodeRotation(cameraNode.rotation, rot);
+        cameraSmoothInterpolate.Start(0.5f);
     }
-
     else if (key == KEY_KP_5 && ui.focusElement is null)
     {
         activeViewport.ToggleOrthographic();
@@ -1746,6 +1749,7 @@ void SetIconEnabledColor(UIElement@ element, bool enabled, bool partial = false)
 void UpdateDirtyUI()
 {
     UpdateDirtyToolBar();
+	terrainEditor.UpdateDirty();
 
     // Perform hierarchy selection latently after the new selections are finalized (used in undo/redo action)
     if (!hierarchyUpdateSelections.empty)
@@ -1761,7 +1765,7 @@ void UpdateDirtyUI()
 
 void HandleMessageAcknowledgement(StringHash eventType, VariantMap& eventData)
 {
-    if (eventData["Ok"].GetBool())
+    if (eventData["OK"].GetBool())
         messageBoxCallback();
     else
         messageBoxCallback = null;
@@ -1948,7 +1952,15 @@ bool ColorWheelBuildMenuSelectTypeColor()
 
         actions.Push(CreateContextMenuItem("Cancel", "HandleColorWheelMenu", "menuCancel"));
     }
-
+    else if (coloringComponent.typeName == "Text3D")
+    {
+        actions.Push(CreateContextMenuItem("Color", "HandleColorWheelMenu", "c"));
+        actions.Push(CreateContextMenuItem("Top left color", "HandleColorWheelMenu", "tl"));
+        actions.Push(CreateContextMenuItem("Top right color", "HandleColorWheelMenu", "tr"));
+        actions.Push(CreateContextMenuItem("Bottom left color", "HandleColorWheelMenu", "bl"));
+        actions.Push(CreateContextMenuItem("Bottom right color", "HandleColorWheelMenu", "br"));
+        actions.Push(CreateContextMenuItem("Cancel", "HandleColorWheelMenu", "menuCancel"));
+    }
     if (actions.length > 0) {
         ActivateContextMenu(actions);
         return true;
@@ -2080,6 +2092,24 @@ void HandleWheelChangeColor(StringHash eventType, VariantMap& eventData)
                     zone.fogColor = c;
                 }
 
+                attributesDirty = true;
+            }
+        }
+        else if (coloringComponent.typeName == "Text3D") 
+        {
+            Text3D@ txt = cast<Text3D>(coloringComponent);
+            if (txt !is null) 
+            {
+                if (coloringPropertyName == "c")
+                    txt.color = c;
+                else if (coloringPropertyName == "tl") 
+                    txt.colors[C_TOPLEFT] = c;
+                else if (coloringPropertyName == "tr") 
+                    txt.colors[C_TOPRIGHT] = c;
+                else if (coloringPropertyName == "bl") 
+                    txt.colors[C_BOTTOMLEFT] = c;
+                else if (coloringPropertyName == "br") 
+                    txt.colors[C_BOTTOMRIGHT] = c;
                 attributesDirty = true;
             }
         }

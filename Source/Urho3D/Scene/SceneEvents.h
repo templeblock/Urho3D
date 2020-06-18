@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2016 the Urho3D project.
+// Copyright (c) 2008-2020 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -102,13 +102,13 @@ URHO3D_EVENT(E_ASYNCLOADPROGRESS, AsyncLoadProgress)
     URHO3D_PARAM(P_TOTALNODES, TotalNodes);        // int
     URHO3D_PARAM(P_LOADEDRESOURCES, LoadedResources); // int
     URHO3D_PARAM(P_TOTALRESOURCES, TotalResources);   // int
-};
+}
 
 /// Asynchronous scene loading finished.
 URHO3D_EVENT(E_ASYNCLOADFINISHED, AsyncLoadFinished)
 {
     URHO3D_PARAM(P_SCENE, Scene);                  // Scene pointer
-};
+}
 
 /// A child node has been added to a parent node.
 URHO3D_EVENT(E_NODEADDED, NodeAdded)
@@ -118,7 +118,7 @@ URHO3D_EVENT(E_NODEADDED, NodeAdded)
     URHO3D_PARAM(P_NODE, Node);                    // Node pointer
 }
 
-/// A child node is about to be removed from a parent node.
+/// A child node is about to be removed from a parent node. Note that individual component removal events will not be sent.
 URHO3D_EVENT(E_NODEREMOVED, NodeRemoved)
 {
     URHO3D_PARAM(P_SCENE, Scene);                  // Scene pointer

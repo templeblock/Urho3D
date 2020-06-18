@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2016 the Urho3D project.
+// Copyright (c) 2008-2020 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -63,8 +63,8 @@ void Character::Start()
 void Character::FixedUpdate(float timeStep)
 {
     /// \todo Could cache the components for faster access instead of finding them each frame
-    RigidBody* body = GetComponent<RigidBody>();
-    AnimationController* animCtrl = node_->GetComponent<AnimationController>(true);
+    auto* body = GetComponent<RigidBody>();
+    auto* animCtrl = node_->GetComponent<AnimationController>(true);
 
     // Update the in air timer. Reset if grounded
     if (!onGround_)
@@ -103,7 +103,7 @@ void Character::FixedUpdate(float timeStep)
         Vector3 brakeForce = -planeVelocity * BRAKE_FORCE;
         body->ApplyImpulse(brakeForce);
 
-        // Jump. Must release jump control inbetween jumps
+        // Jump. Must release jump control between jumps
         if (controls_.IsDown(CTRL_JUMP))
         {
             if (okToJump_)

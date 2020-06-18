@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2008-2016 the Urho3D project.
+// Copyright (c) 2008-2020 the Urho3D project.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,18 +34,16 @@ class URHO3D_API OffMeshConnection : public Component
 
 public:
     /// Construct.
-    OffMeshConnection(Context* context);
+    explicit OffMeshConnection(Context* context);
     /// Destruct.
-    virtual ~OffMeshConnection();
+    ~OffMeshConnection() override;
     /// Register object factory.
     static void RegisterObject(Context* context);
 
-    /// Handle attribute write access.
-    virtual void OnSetAttribute(const AttributeInfo& attr, const Variant& src);
     /// Apply attribute changes that can not be applied immediately. Called after scene load or a network update.
-    virtual void ApplyAttributes();
+    void ApplyAttributes() override;
     /// Visualize the component as debug geometry.
-    virtual void DrawDebugGeometry(DebugRenderer* debug, bool depthTest);
+    void DrawDebugGeometry(DebugRenderer* debug, bool depthTest) override;
 
     /// Set endpoint node.
     void SetEndPoint(Node* node);
@@ -53,9 +51,9 @@ public:
     void SetRadius(float radius);
     /// Set bidirectional flag. Default true.
     void SetBidirectional(bool enabled);
-    /// Set a user assigned mask
+    /// Set a user assigned mask.
     void SetMask(unsigned newMask);
-    /// Sets the assigned area Id for the connection
+    /// Sets the assigned area Id for the connection.
     void SetAreaID(unsigned newAreaID);
 
     /// Return endpoint node.
@@ -67,13 +65,15 @@ public:
     /// Return whether is bidirectional.
     bool IsBidirectional() const { return bidirectional_; }
 
-    /// Return the user assigned mask
+    /// Return the user assigned mask.
     unsigned GetMask() const { return mask_; }
 
-    /// Return the user assigned area ID
+    /// Return the user assigned area ID.
     unsigned GetAreaID() const { return areaId_; }
 
 private:
+    /// Mark end point dirty.
+    void MarkEndPointDirty() { endPointDirty_ = true; }
     /// Endpoint node.
     WeakPtr<Node> endPoint_;
     /// Endpoint node ID.
@@ -84,9 +84,9 @@ private:
     bool bidirectional_;
     /// Endpoint changed flag.
     bool endPointDirty_;
-    /// Flags mask to represent properties of this mesh
+    /// Flags mask to represent properties of this mesh.
     unsigned mask_;
-    /// Area id to be used for this off mesh connection's internal poly
+    /// Area id to be used for this off mesh connection's internal poly.
     unsigned areaId_;
 };
 
